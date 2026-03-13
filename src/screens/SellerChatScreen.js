@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Image,
   ActivityIndicator,
   Keyboard,
+  Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,6 +22,41 @@ import { useToast } from "../context/ToastContext";
 import { colors, getTheme } from "../theme/colors";
 import { ResponsiveContainer } from "../components/ResponsiveContainer";
 import { useResponsive } from "../hooks/useResponsive";
+
+const CARD_WIDTH = Math.min(Dimensions.get("window").width * 0.65, 260);
+
+const getDateLabel = (dateStr) => {
+  const date = new Date(dateStr);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return "Today";
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() !== today.getFullYear() && { year: "numeric" }),
+  });
+};
+
+const getPresenceSubtitle = (isOnline, lastSeenAt) => {
+  if (isOnline) return "Online";
+  if (!lastSeenAt) return "Offline";
+
+  const diffMs = Date.now() - new Date(lastSeenAt).getTime();
+  if (Number.isNaN(diffMs) || diffMs < 0) return "Offline";
+
+  const diffMinutes = Math.floor(diffMs / 60000);
+  if (diffMinutes < 1) return "Last seen just now";
+  if (diffMinutes < 60) return `Last seen ${diffMinutes}m ago`;
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `Last seen ${diffHours}h ago`;
+  if (diffHours < 48) return "Last seen yesterday";
+
+  return `Last seen ${new Date(lastSeenAt).toLocaleDateString()}`;
+};
 
 export const SellerChatScreen = ({
   route,
@@ -42,9 +78,42 @@ export const SellerChatScreen = ({
   const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [customerOnline, setCustomerOnline] = useState(false);
+  const [customerLastSeenAt, setCustomerLastSeenAt] = useState(
+    conversation?.user?.last_seen_at || null,
+  );
   const flatListRef = useRef(null);
+  const presenceChannelRef = useRef(null);
+  const customerLastSeenChannelRef = useRef(null);
+  const isNearBottomRef = useRef(true);
+  const didInitialAutoScrollRef = useRef(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [inputHeight, setInputHeight] = useState(72);
+
+  const BOTTOM_AUTO_SCROLL_THRESHOLD = 120;
+
+  const updateNearBottomState = (event) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceFromBottom =
+      contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    isNearBottomRef.current =
+      distanceFromBottom <= BOTTOM_AUTO_SCROLL_THRESHOLD;
+  };
+
+  const scrollToBottom = (animated = true, force = false) => {
+    if (!force && !isNearBottomRef.current) return;
+
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToEnd({ animated });
+    });
+  };
+
+  const handleMessageImageLoad = () => {
+    scrollToBottom(false);
+    setTimeout(() => {
+      scrollToBottom(false);
+    }, 60);
+  };
 
   // keyboard visibility tracking removed; not needed for padding
 
@@ -52,8 +121,19 @@ export const SellerChatScreen = ({
     if (conversation) {
       fetchMessages();
       const subscription = setupRealtimeSubscription();
+      fetchCustomerLastSeen();
+      setupCustomerLastSeenSubscription();
+      setupPresence();
       return () => {
         if (subscription) subscription.unsubscribe();
+        if (customerLastSeenChannelRef.current) {
+          supabase.removeChannel(customerLastSeenChannelRef.current);
+          customerLastSeenChannelRef.current = null;
+        }
+        if (presenceChannelRef.current) {
+          supabase.removeChannel(presenceChannelRef.current);
+          presenceChannelRef.current = null;
+        }
       };
     }
   }, [conversation]);
@@ -96,13 +176,84 @@ export const SellerChatScreen = ({
 
       // Auto scroll to bottom after messages are loaded
       setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: false });
+        scrollToBottom(false, true);
       }, 100);
     } catch (error) {
       console.error("Error fetching messages:", error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchCustomerLastSeen = async () => {
+    const customerId = conversation?.user?.id || conversation?.user_id;
+    if (!customerId) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("express_profiles")
+        .select("last_seen_at")
+        .eq("id", customerId)
+        .single();
+
+      if (error) throw error;
+      setCustomerLastSeenAt(data?.last_seen_at || null);
+    } catch (error) {
+      console.error("Error fetching customer last seen:", error);
+    }
+  };
+
+  const setupCustomerLastSeenSubscription = () => {
+    const customerId = conversation?.user?.id || conversation?.user_id;
+    if (!customerId) return;
+
+    const channel = supabase
+      .channel(`customer-last-seen:${customerId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "express_profiles",
+          filter: `id=eq.${customerId}`,
+        },
+        (payload) => {
+          setCustomerLastSeenAt(payload.new.last_seen_at || null);
+        },
+      )
+      .subscribe();
+
+    customerLastSeenChannelRef.current = channel;
+  };
+
+  const setupPresence = () => {
+    const customerId = conversation?.user?.id || conversation?.user_id;
+    if (!customerId) return;
+
+    const channel = supabase.channel(`presence:user:${customerId}`);
+
+    const syncCustomerPresence = () => {
+      const state = channel.presenceState();
+      const isCustomerCurrentlyOnline = Object.values(state).some((presences) =>
+        presences.some((presence) => presence.actor_type === "user"),
+      );
+      setCustomerOnline(isCustomerCurrentlyOnline);
+      if (!isCustomerCurrentlyOnline) {
+        fetchCustomerLastSeen();
+      }
+    };
+
+    channel
+      .on("presence", { event: "sync" }, syncCustomerPresence)
+      .on("presence", { event: "join" }, syncCustomerPresence)
+      .on("presence", { event: "leave" }, syncCustomerPresence)
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          syncCustomerPresence();
+        }
+      });
+
+    presenceChannelRef.current = channel;
   };
 
   const setupRealtimeSubscription = () => {
@@ -179,8 +330,91 @@ export const SellerChatScreen = ({
     }
   };
 
+  const enrichedMessages = useMemo(() => {
+    const result = [];
+    let lastDate = null;
+    for (const msg of messages) {
+      const dateKey = new Date(msg.created_at).toDateString();
+      if (dateKey !== lastDate) {
+        result.push({
+          id: `divider-${dateKey}`,
+          type: "date_divider",
+          date: msg.created_at,
+        });
+        lastDate = dateKey;
+      }
+      result.push(msg);
+    }
+    return result;
+  }, [messages]);
+
   const renderMessage = ({ item }) => {
+    if (item.type === "date_divider") {
+      return (
+        <View style={styles.dateDivider}>
+          <View style={styles.dateDividerLine} />
+          <Text style={styles.dateDividerText}>{getDateLabel(item.date)}</Text>
+          <View style={styles.dateDividerLine} />
+        </View>
+      );
+    }
+
     const isSeller = item.sender_type === "seller";
+    const isProductCard = item.message?.startsWith("PRODUCT_CARD:");
+
+    if (isProductCard) {
+      let productData = null;
+      try {
+        productData = JSON.parse(item.message.slice("PRODUCT_CARD:".length));
+      } catch (e) {}
+      const finalPrice =
+        productData?.discount > 0
+          ? productData.price * (1 - productData.discount / 100)
+          : productData?.price || 0;
+
+      return (
+        <View
+          style={[
+            styles.messageWrapper,
+            isSeller ? styles.sellerWrapper : styles.userWrapper,
+          ]}
+        >
+          <View
+            style={[
+              styles.productCardBubble,
+              isSeller
+                ? styles.productCardBubbleSeller
+                : styles.productCardBubbleUser,
+            ]}
+          >
+            {productData?.image && (
+              <Image
+                source={{ uri: productData.image }}
+                style={styles.productCardImage}
+                resizeMode="cover"
+                onLoadEnd={handleMessageImageLoad}
+                onError={handleMessageImageLoad}
+              />
+            )}
+            <View style={styles.productCardBody}>
+              <Text style={styles.productCardLabel}>Product Enquiry</Text>
+              <Text style={styles.productCardTitle} numberOfLines={2}>
+                {productData?.title || "Product"}
+              </Text>
+              <Text style={styles.productCardPrice}>
+                GH₵{Number(finalPrice).toLocaleString()}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.messageTime}>
+            {new Date(item.created_at).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </Text>
+        </View>
+      );
+    }
 
     return (
       <View
@@ -252,8 +486,15 @@ export const SellerChatScreen = ({
             <View>
               <Text style={styles.headerTitle}>{userName}</Text>
               <View style={styles.statusRow}>
-                <View style={styles.statusDot} />
-                <Text style={styles.headerSubtitle}>Customer</Text>
+                <View
+                  style={[
+                    styles.statusDot,
+                    { backgroundColor: customerOnline ? "#10B981" : "#9CA3AF" },
+                  ]}
+                />
+                <Text style={styles.headerSubtitle}>
+                  {getPresenceSubtitle(customerOnline, customerLastSeenAt)}
+                </Text>
               </View>
             </View>
           </View>
@@ -274,7 +515,7 @@ export const SellerChatScreen = ({
       >
         <FlatList
           ref={flatListRef}
-          data={messages}
+          data={enrichedMessages}
           keyExtractor={(item) => item.id}
           renderItem={renderMessage}
           contentContainerStyle={[
@@ -283,10 +524,15 @@ export const SellerChatScreen = ({
               paddingBottom: inputHeight + insets.bottom + keyboardHeight + 16,
             },
           ]}
-          onContentSizeChange={() =>
-            flatListRef.current?.scrollToEnd({ animated: true })
-          }
-          onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          onContentSizeChange={() => scrollToBottom(true)}
+          onLayout={() => {
+            if (!didInitialAutoScrollRef.current) {
+              didInitialAutoScrollRef.current = true;
+              scrollToBottom(false, true);
+            }
+          }}
+          onScroll={updateNearBottomState}
+          scrollEventThrottle={16}
         />
 
         <View
@@ -389,7 +635,6 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#10B981",
   },
   headerSubtitle: {
     fontSize: 12,
@@ -458,6 +703,25 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginHorizontal: 4,
   },
+  dateDivider: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 12,
+    paddingHorizontal: 4,
+  },
+  dateDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "#E5E7EB",
+  },
+  dateDividerText: {
+    fontSize: 12,
+    color: colors.muted,
+    marginHorizontal: 10,
+    fontWeight: "600",
+    backgroundColor: colors.background,
+    paddingHorizontal: 4,
+  },
   inputContainer: {
     backgroundColor: "#fff",
     paddingHorizontal: 16,
@@ -498,5 +762,55 @@ const styles = StyleSheet.create({
   sendButtonDisabled: {
     backgroundColor: colors.muted,
     opacity: 0.5,
+  },
+  productCardBubble: {
+    borderRadius: 16,
+    overflow: "hidden",
+    width: CARD_WIDTH,
+    backgroundColor: "#fff",
+    borderBottomLeftRadius: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  productCardBubbleSeller: {
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 4,
+    backgroundColor: colors.primary,
+  },
+  productCardBubbleUser: {
+    borderBottomLeftRadius: 4,
+    borderBottomRightRadius: 16,
+    backgroundColor: "#fff",
+  },
+  productCardImage: {
+    width: CARD_WIDTH,
+    height: 160,
+    backgroundColor: "#F3F4F6",
+  },
+  productCardBody: {
+    padding: 12,
+  },
+  productCardLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.primary,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  productCardTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.dark,
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  productCardPrice: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: colors.primary,
   },
 });

@@ -1,11 +1,18 @@
-import { StyleSheet, Text, View, Platform } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "../theme/colors";
 import { useResponsive } from "../hooks/useResponsive";
 
 export const Header = ({ title }) => {
   const { horizontalPadding } = useResponsive();
+  const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.container, { paddingHorizontal: horizontalPadding }]}>
+    <View
+      style={[
+        styles.container,
+        { paddingHorizontal: horizontalPadding, paddingTop: insets.top + 8 },
+      ]}
+    >
       <Text style={styles.title}>{title}</Text>
     </View>
   );
@@ -13,7 +20,6 @@ export const Header = ({ title }) => {
 
 const styles = StyleSheet.create({
   container: {
-    paddingTop: Platform.OS === "ios" ? 60 : 40,
     paddingBottom: 16,
     backgroundColor: "#fff",
     borderBottomWidth: 1,

@@ -103,6 +103,12 @@ export const StatusCreatorScreen = ({ navigation }) => {
   };
 
   const takePhoto = async () => {
+    if (Platform.OS === "web") {
+      toast.info("Camera capture is limited on web", "Choose from gallery");
+      await pickImage();
+      return;
+    }
+
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") {
       toast.error("Camera permission is required");
@@ -125,6 +131,35 @@ export const StatusCreatorScreen = ({ navigation }) => {
     return statusText.trim().length > 0;
   };
 
+  const getImageExtension = (uri) => {
+    const cleanUri = uri?.split("?")[0] || "";
+    const ext = cleanUri.split(".").pop()?.toLowerCase();
+    if (!ext || ext.length > 5) return "jpg";
+    return ext === "jpeg" ? "jpg" : ext;
+  };
+
+  const uploadStatusImage = async (uri) => {
+    const response = await fetch(uri);
+    const arrayBuffer = await response.arrayBuffer();
+    const fileData = new Uint8Array(arrayBuffer);
+    const ext = getImageExtension(uri);
+    const fileName = `${sellerId}/${Date.now()}.${ext}`;
+    const contentType =
+      response.headers.get("content-type") ||
+      `image/${ext === "jpg" ? "jpeg" : ext}`;
+
+    const { error } = await supabase.storage
+      .from("seller-statuses")
+      .upload(fileName, fileData, {
+        contentType,
+        cacheControl: "3600",
+        upsert: false,
+      });
+
+    if (error) throw error;
+    return fileName;
+  };
+
   const handlePost = async () => {
     if (!canPost()) {
       toast.error(
@@ -141,19 +176,7 @@ export const StatusCreatorScreen = ({ navigation }) => {
     setLoading(true);
     try {
       if (statusMode === "image") {
-        const fileName = `${sellerId}/${Date.now()}.jpg`;
-        const formData = new FormData();
-        formData.append("file", {
-          uri: Platform.OS === "ios" ? image.replace("file://", "") : image,
-          name: "status.jpg",
-          type: "image/jpeg",
-        });
-
-        const { error: uploadError } = await supabase.storage
-          .from("seller-statuses")
-          .upload(fileName, formData);
-
-        if (uploadError) throw uploadError;
+        const fileName = await uploadStatusImage(image);
 
         const {
           data: { publicUrl },

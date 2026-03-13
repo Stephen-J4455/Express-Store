@@ -8,7 +8,7 @@ export const colors = {
   info: "#06B6D4",
   surface: "#FFFFFF",
   border: "#E6EEF8",
-  background: "#e8e8e9"
+  background: "#ffffffd6",
 };
 
 // Unified preset themes (20 total). Each theme includes id, primary, gradient stops, and an accent.

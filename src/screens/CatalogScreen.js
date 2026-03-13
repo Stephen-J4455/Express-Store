@@ -1767,6 +1767,35 @@ const CatalogScreen = () => {
                 </View>
               </View>
             </ScrollView>
+            {/* Detail Modal Footer Actions */}
+            <View style={styles.detailFooter}>
+              <Pressable
+                style={styles.detailFooterBtn}
+                onPress={() => {
+                  setDetailModalVisible(false);
+                  openEditModal(viewingProduct);
+                }}
+              >
+                <Ionicons
+                  name="create-outline"
+                  size={20}
+                  color={colors.primary}
+                />
+                <Text style={styles.detailFooterBtnText}>Edit Product</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.detailFooterBtn, styles.detailFooterBtnPrimary]}
+                onPress={() => {
+                  setDetailModalVisible(false);
+                  navigation.navigate("Chats");
+                }}
+              >
+                <Ionicons name="chatbubble-ellipses" size={20} color="#fff" />
+                <Text style={[styles.detailFooterBtnText, { color: "#fff" }]}>
+                  Buyer Chats
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </Modal>
 
@@ -2499,6 +2528,36 @@ const styles = StyleSheet.create({
   detailModal: {
     flex: 1,
     backgroundColor: "#fff",
+  },
+  detailFooter: {
+    flexDirection: "row",
+    padding: 16,
+    paddingBottom: 28,
+    gap: 12,
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: "#F3F4F6",
+  },
+  detailFooterBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    height: 52,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: colors.primary + "40",
+    backgroundColor: colors.light,
+  },
+  detailFooterBtnPrimary: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  detailFooterBtnText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: colors.primary,
   },
   detailFloatingBackButton: {
     position: "absolute",

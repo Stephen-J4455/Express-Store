@@ -11,49 +11,15 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../supabase";
 import { useToast } from "../context/ToastContext";
-import * as WebBrowser from "expo-web-browser";
 import { colors } from "../theme/colors";
 import { ResponsiveContainer } from "../components/ResponsiveContainer";
-
-WebBrowser.maybeCompleteAuthSession();
 
 export default function SellerLoginScreen({ navigation }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const toast = useToast();
-
-  const handleGoogleLogin = async () => {
-    setGoogleLoading(true);
-    try {
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: "expressseller://",
-          skipBrowserRedirect: false,
-        },
-      });
-
-      if (error) throw error;
-
-      if (data?.url) {
-        const result = await WebBrowser.openAuthSessionAsync(
-          data.url,
-          "expressseller://",
-        );
-
-        if (result.type === "success" && result.url) {
-          // Process url if needed, but usually supabase onAuthStateChange picks it up
-          // if deep linking is set up correctly in App.js
-        }
-      }
-    } catch (error) {
-      toast.error(error.message);
-      setGoogleLoading(false);
-    }
-  };
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -152,31 +118,6 @@ export default function SellerLoginScreen({ navigation }) {
               <Text style={styles.buttonText}>Login</Text>
             )}
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.googleButton,
-              googleLoading && styles.buttonDisabled,
-            ]}
-            onPress={handleGoogleLogin}
-            disabled={googleLoading || loading}
-          >
-            {googleLoading ? (
-              <ActivityIndicator color={colors.dark} />
-            ) : (
-              <>
-                <Ionicons
-                  name="logo-google"
-                  size={20}
-                  color={colors.dark}
-                  style={{ marginRight: 10 }}
-                />
-                <Text style={styles.googleButtonText}>
-                  Continue with Google
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
         </View>
       </SafeAreaView>
     </ResponsiveContainer>
@@ -256,21 +197,5 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 14,
     fontWeight: "500",
-  },
-  googleButton: {
-    backgroundColor: "#fff",
-    borderRadius: 25,
-    padding: 15,
-    alignItems: "center",
-    marginTop: 15,
-    flexDirection: "row",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  googleButtonText: {
-    color: colors.dark,
-    fontSize: 16,
-    fontWeight: "600",
   },
 });

@@ -4,17 +4,29 @@ import { colors, getTheme } from "../theme/colors";
 import { StatusPill } from "./StatusPill";
 import { FlashSaleBadge } from "./FlashSaleBadge";
 
-export const ProductCard = ({ product, onPress, flashSale, theme: themeProp }) => {
+export const ProductCard = ({
+  product,
+  onPress,
+  flashSale,
+  theme: themeProp,
+}) => {
   const theme = themeProp || getTheme(colors.primary);
   // Handle flash sale data - could be passed directly or from product.flash_sale array
-  const activeFlashSale = flashSale || (product.flash_sale && product.flash_sale.length > 0
-    ? product.flash_sale.find(fs => fs.is_active && new Date(fs.end_time) > new Date())
-    : null);
+  const activeFlashSale =
+    flashSale ||
+    (product.flash_sale && product.flash_sale.length > 0
+      ? product.flash_sale.find(
+          (fs) => fs.is_active && new Date(fs.end_time) > new Date(),
+        )
+      : null);
 
   // Determine actual price (flash sale price takes priority)
   const actualPrice = activeFlashSale?.flash_price || product.price;
-  const hasFlashSale = !!activeFlashSale && new Date(activeFlashSale.end_time) > new Date();
-  const displayDiscount = hasFlashSale ? activeFlashSale.discount_percentage : product.discount;
+  const hasFlashSale =
+    !!activeFlashSale && new Date(activeFlashSale.end_time) > new Date();
+  const displayDiscount = hasFlashSale
+    ? activeFlashSale.discount_percentage
+    : product.discount;
 
   return (
     <Pressable
@@ -25,22 +37,30 @@ export const ProductCard = ({ product, onPress, flashSale, theme: themeProp }) =
         {product.thumbnails?.[0] && (
           <Image source={{ uri: product.thumbnails[0] }} style={styles.image} />
         )}
-        {hasFlashSale && (
+        {hasFlashSale ? (
           <FlashSaleBadge
             discountPercentage={activeFlashSale.discount_percentage}
             position="top-left"
           />
-        )}
+        ) : product.discount > 0 ? (
+          <View style={styles.discountOverlay}>
+            <Text style={styles.discountOverlayText}>
+              {product.discount}% OFF
+            </Text>
+          </View>
+        ) : null}
       </View>
       <View style={styles.content}>
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.title} numberOfLines={2}>
+            <Text style={styles.title} numberOfLines={1}>
               {product.title}
             </Text>
             <View style={styles.metaRow}>
               <Ionicons name="folder-outline" size={12} color={colors.muted} />
-              <Text style={styles.metaText}>{product.category || "No category"}</Text>
+              <Text style={styles.metaText} numberOfLines={1}>
+                {product.category || "No category"}
+              </Text>
             </View>
           </View>
           <StatusPill value={product.status} />
@@ -48,31 +68,10 @@ export const ProductCard = ({ product, onPress, flashSale, theme: themeProp }) =
 
         <View style={styles.details}>
           <View style={styles.priceRow}>
-            {hasFlashSale && (
-              <Text style={styles.originalPrice}>
-                GH₵{Number(activeFlashSale.original_price || product.price).toLocaleString()}
-              </Text>
-            )}
             <Text style={[styles.currency, { color: theme.primary }]}>GH₵</Text>
             <Text style={[styles.priceValue, { color: theme.primary }]}>
               {Number(actualPrice || 0).toLocaleString()}
             </Text>
-            {hasFlashSale ? (
-              <View style={styles.discountBadge}>
-                  <Ionicons name="flash" size={12} color="#fff" />
-                <Text style={styles.discountText}>
-                  {Math.round(activeFlashSale.discount_percentage)}% OFF
-                </Text>
-              </View>
-            ) : (
-              product.discount > 0 && (
-                <View style={styles.discountBadge}>
-                  <Text style={styles.discountText}>
-                    {product.discount}% OFF
-                  </Text>
-                </View>
-              )
-            )}
           </View>
           <View style={styles.metaRow}>
             <Ionicons name="cube-outline" size={12} color={colors.muted} />
@@ -80,23 +79,25 @@ export const ProductCard = ({ product, onPress, flashSale, theme: themeProp }) =
           </View>
         </View>
 
-        <View style={styles.footer}>
-          {product.badges && product.badges.length > 0 ? (
+        {product.badges && product.badges.length > 0 && (
+          <View style={styles.footer}>
             <View style={styles.badges}>
               {product.badges.slice(0, 2).map((badge) => (
-                <View key={badge} style={[styles.badge, { backgroundColor: theme.primary + '15' }]}>
-                  <Text style={[styles.badgeText, { color: theme.primary }]}>{badge}</Text>
+                <View
+                  key={badge}
+                  style={[
+                    styles.badge,
+                    { backgroundColor: theme.primary + "15" },
+                  ]}
+                >
+                  <Text style={[styles.badgeText, { color: theme.primary }]}>
+                    {badge}
+                  </Text>
                 </View>
               ))}
             </View>
-          ) : (
-             <View style={{ flex: 1 }} />
-          )}
-          <View style={[styles.viewButton, { backgroundColor: theme.primary + '15' }]}> 
-            <Ionicons name="eye-outline" size={16} color={theme.primary} />
-            <Text style={[styles.viewButtonText, { color: theme.primary }]}>View</Text>
           </View>
-        </View>
+        )}
       </View>
     </Pressable>
   );
@@ -222,18 +223,25 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: "600",
   },
-  viewButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
+  discountOverlay: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    backgroundColor: "#EF4444",
+    paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 10,
-    backgroundColor: colors.primaryLight,
+    borderRadius: 8,
+    zIndex: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
   },
-  viewButtonText: {
-    fontSize: 13,
-    color: colors.primary,
+  discountOverlayText: {
+    color: "#fff",
+    fontSize: 12,
     fontWeight: "700",
+    letterSpacing: -0.2,
   },
 });

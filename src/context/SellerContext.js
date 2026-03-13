@@ -4,8 +4,10 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
+import { AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase, invokeEdgeFunction } from "../../supabase";
 import notificationService from "../services/notificationService";
@@ -59,6 +61,74 @@ export const SellerProvider = ({ children }) => {
   const [needsSubaccount, setNeedsSubaccount] = useState(false);
   const [payments, setPayments] = useState([]);
   const [settings, setSettings] = useState({});
+  const appStateRef = useRef(AppState.currentState);
+  const presenceChannelRef = useRef(null);
+
+  const updateLastSeen = useCallback(async (currentSellerId) => {
+    if (!supabase || !currentSellerId) return;
+
+    try {
+      await supabase
+        .from("express_sellers")
+        .update({ last_seen_at: new Date().toISOString() })
+        .eq("id", currentSellerId);
+    } catch (error) {
+      console.warn("Seller last-seen update failed:", error);
+    }
+  }, []);
+
+  const stopPresence = useCallback(
+    async (currentSellerId, recordLastSeen = true) => {
+      if (recordLastSeen) {
+        await updateLastSeen(currentSellerId);
+      }
+
+      if (!presenceChannelRef.current) return;
+
+      try {
+        await presenceChannelRef.current.untrack();
+      } catch (error) {
+        console.warn("Seller presence untrack failed:", error);
+      }
+
+      supabase.removeChannel(presenceChannelRef.current);
+      presenceChannelRef.current = null;
+    },
+    [updateLastSeen],
+  );
+
+  const startPresence = useCallback(
+    async (currentSellerId) => {
+      if (!supabase || !currentSellerId) return;
+
+      const currentTopic = `presence:seller:${currentSellerId}`;
+      if (presenceChannelRef.current?.topic === currentTopic) return;
+
+      await stopPresence(currentSellerId, false);
+
+      const channel = supabase.channel(currentTopic, {
+        config: { presence: { key: String(currentSellerId) } },
+      });
+
+      channel.subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          try {
+            await channel.track({
+              actor_id: currentSellerId,
+              actor_type: "seller",
+              app_state: "active",
+              online_at: new Date().toISOString(),
+            });
+          } catch (error) {
+            console.error("Seller presence track failed:", error);
+          }
+        }
+      });
+
+      presenceChannelRef.current = channel;
+    },
+    [stopPresence],
+  );
 
   // Get seller ID from user profile
   const getSellerId = useCallback(async () => {
@@ -171,6 +241,7 @@ export const SellerProvider = ({ children }) => {
   // Logout function
   const logout = useCallback(async () => {
     try {
+      await stopPresence(sellerId);
       await supabase.auth.signOut();
       await AsyncStorage.removeItem(AUTH_USER_KEY);
       await AsyncStorage.removeItem(AUTH_ROLE_KEY);
@@ -185,7 +256,7 @@ export const SellerProvider = ({ children }) => {
     } catch (error) {
       console.error("Error signing out:", error);
     }
-  }, []);
+  }, [sellerId, stopPresence]);
 
   // Fetch chats with user relationship
   const fetchChats = useCallback(async (sellerIdParam) => {
@@ -482,7 +553,6 @@ export const SellerProvider = ({ children }) => {
           filter: `seller_id=eq.${sellerId}`,
         },
         (payload) => {
-          console.log("Order change:", payload);
           if (payload.eventType === "INSERT") {
             // Fetch full order with items
             supabase
@@ -493,10 +563,6 @@ export const SellerProvider = ({ children }) => {
               .then(({ data }) => {
                 if (data) setOrders((prev) => [data, ...prev]);
               });
-            // Log new order notification
-            console.log(
-              `New Order! Order #${payload.new.order_number} received`,
-            );
           } else if (payload.eventType === "UPDATE") {
             setOrders((prev) =>
               prev.map((order) =>
@@ -522,7 +588,6 @@ export const SellerProvider = ({ children }) => {
           filter: `seller_id=eq.${sellerId}`,
         },
         (payload) => {
-          console.log("Product change:", payload);
           if (payload.eventType === "UPDATE") {
             setProducts((prev) =>
               prev.map((product) =>
@@ -533,17 +598,7 @@ export const SellerProvider = ({ children }) => {
             );
             // Notify on status change
             if (payload.old.status !== payload.new.status) {
-              const statusMessages = {
-                active: "approved and is now live",
-                rejected: "rejected",
-                pending: "submitted for review",
-              };
-              const msg = statusMessages[payload.new.status];
-              if (msg) {
-                console.log(
-                  `Product Update: "${payload.new.title}" has been ${msg}`,
-                );
-              }
+              // Status change is handled by state updates above.
             }
           }
         },
@@ -562,7 +617,6 @@ export const SellerProvider = ({ children }) => {
           filter: `seller_id=eq.${sellerId}`,
         },
         async (payload) => {
-          console.log("Flash sale change:", payload);
           // Refresh products to get updated flash sale data
           try {
             const { data: updatedProducts } = await supabase
@@ -608,7 +662,6 @@ export const SellerProvider = ({ children }) => {
           filter: `seller_id=eq.${sellerId}`,
         },
         (payload) => {
-          console.log("Chat change:", payload);
           // Re-fetch all chats to ensure user relationship data is preserved
           fetchChats(sellerId);
         },
@@ -627,6 +680,34 @@ export const SellerProvider = ({ children }) => {
     fetchAll();
   }, [fetchAll]);
 
+  useEffect(() => {
+    if (!supabase) return;
+
+    const syncPresence = async (nextAppState = appStateRef.current) => {
+      if (sellerId && nextAppState === "active") {
+        await startPresence(sellerId);
+        return;
+      }
+
+      await stopPresence(sellerId);
+    };
+
+    syncPresence();
+
+    const subscription = AppState.addEventListener(
+      "change",
+      async (nextAppState) => {
+        appStateRef.current = nextAppState;
+        await syncPresence(nextAppState);
+      },
+    );
+
+    return () => {
+      subscription.remove();
+      stopPresence(sellerId);
+    };
+  }, [sellerId, startPresence, stopPresence]);
+
   const metrics = useMemo(() => {
     const pendingProducts = products.filter(
       (p) => p.status === "pending",
@@ -643,10 +724,16 @@ export const SellerProvider = ({ children }) => {
     const unreadChats = conversations.filter((c) => c.unread_count > 0).length;
 
     // Payment fee metrics — Paystack deductions and net earnings
-    // Service fee percentage from admin settings (needed for fallback below)
+    // Service fee percentage from admin settings — only used for display, NOT for calculating
+    // historic commission amounts (rate may change over time, stored per-order values are canonical)
     const serviceFeePercentage = parseFloat(
       settings.service_fee_percentage || "0",
     );
+
+    const successfulOrders = orders.filter(
+      (o) => o.payment_status === "success",
+    );
+
     // totalPaystackFees: sum of Paystack processing fees in GHS (stored in pesewas)
     const totalPaystackFeesFromPayments =
       payments.reduce(
@@ -659,24 +746,30 @@ export const SellerProvider = ({ children }) => {
       0,
     );
     // netRevenue: total earnings after service fee deduction
-    // Falls back to estimating from order revenue when payments table is empty
+    // Falls back to order-level stored values when payments table is empty
     const netRevenueFromPayments = payments.reduce(
       (sum, p) => sum + Number(p.seller_amount || 0),
       0,
     );
 
-    // Fallbacks for when express_payments rows exist but fee columns are unpopulated (default 0)
+    // Order-level fallbacks: use the service_fee stored on each order at the time it was placed.
+    // This ensures historic figures stay correct even if the admin changes the service fee rate.
+    const commissionPaidFromOrders = successfulOrders.reduce(
+      (sum, o) => sum + Number(o.service_fee || 0),
+      0,
+    );
+    const netRevenueFromOrders = successfulOrders.reduce(
+      (sum, o) => sum + (Number(o.total || 0) - Number(o.service_fee || 0)),
+      0,
+    );
+
+    // Prefer real payment records; fall back to per-order stored service_fee; last resort: raw revenue
     const commissionPaid =
       commissionPaidFromPayments > 0
         ? commissionPaidFromPayments
-        : revenue > 0 && serviceFeePercentage > 0
-          ? revenue * (serviceFeePercentage / 100)
-          : 0;
+        : commissionPaidFromOrders;
 
     // Paystack Ghana fee estimate: 1.5% + GHS 0.50 per successful order, capped at GHS 2000
-    const successfulOrders = orders.filter(
-      (o) => o.payment_status === "success",
-    );
     const totalPaystackFees =
       totalPaystackFeesFromPayments > 0
         ? totalPaystackFeesFromPayments
@@ -690,14 +783,15 @@ export const SellerProvider = ({ children }) => {
     const netRevenue =
       netRevenueFromPayments > 0
         ? netRevenueFromPayments
-        : revenue > 0
-          ? revenue * (1 - serviceFeePercentage / 100)
-          : 0;
+        : netRevenueFromOrders > 0
+          ? netRevenueFromOrders
+          : revenue;
 
-    // True when fee values are estimated from order totals (not from real payment records)
+    // True when fee values are estimated (no real payment records and no per-order service_fee stored)
     const feesAreEstimated =
-      payments.length === 0 ||
-      (commissionPaidFromPayments === 0 && totalPaystackFeesFromPayments === 0);
+      commissionPaidFromPayments === 0 &&
+      totalPaystackFeesFromPayments === 0 &&
+      commissionPaidFromOrders === 0;
 
     return {
       pendingProducts,

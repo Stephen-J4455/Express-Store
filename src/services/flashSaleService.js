@@ -19,26 +19,14 @@ export const flashSaleService = {
     maxQuantity = null,
   }) {
     try {
-      const discountPercentage = ((originalPrice - flashPrice) / originalPrice) * 100;
+      const discountPercentage =
+        ((originalPrice - flashPrice) / originalPrice) * 100;
 
       // ensure maxQuantity is a valid number (supabase will treat NaN as null)
       const sanitizedMaxQty =
         maxQuantity != null && !isNaN(maxQuantity)
           ? parseInt(maxQuantity, 10)
           : null;
-
-      // debug: log payload to help track down missing max_quantity issues
-      console.log("creating flash sale payload", {
-        product_id: productId,
-        seller_id: sellerId,
-        flash_price: flashPrice,
-        original_price: originalPrice,
-        discount_percentage: discountPercentage,
-        start_time: startTime,
-        end_time: endTime,
-        max_quantity: sanitizedMaxQty,
-        is_active: true,
-      });
 
       const { data, error } = await supabase
         .from("express_flash_sales")
@@ -75,7 +63,7 @@ export const flashSaleService = {
           `
           *,
           product:express_products(*)
-        `
+        `,
         )
         .eq("seller_id", sellerId)
         .order("created_at", { ascending: false });
@@ -125,7 +113,8 @@ export const flashSaleService = {
 
         const flashPrice = updates.flashPrice || current.flash_price;
         const originalPrice = updates.originalPrice || current.original_price;
-        updates.discount_percentage = ((originalPrice - flashPrice) / originalPrice) * 100;
+        updates.discount_percentage =
+          ((originalPrice - flashPrice) / originalPrice) * 100;
       }
 
       // make sure maxQuantity in updates is a number or null
@@ -206,7 +195,7 @@ export const flashSaleService = {
           `
           *,
           product:express_products(*)
-        `
+        `,
         )
         .eq("seller_id", sellerId)
         .eq("is_active", true)
@@ -234,7 +223,7 @@ export const flashSaleService = {
           `
           *,
           product:express_products(*)
-        `
+        `,
         )
         .eq("seller_id", sellerId)
         .eq("is_active", true)
@@ -261,7 +250,7 @@ export const flashSaleService = {
           `
           *,
           product:express_products(*)
-        `
+        `,
         )
         .eq("seller_id", sellerId)
         .lt("end_time", now)
