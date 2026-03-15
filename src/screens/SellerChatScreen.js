@@ -125,7 +125,7 @@ export const SellerChatScreen = ({
       setupCustomerLastSeenSubscription();
       setupPresence();
       return () => {
-        if (subscription) subscription.unsubscribe();
+        subscription?.unsubscribe?.();
         if (customerLastSeenChannelRef.current) {
           supabase.removeChannel(customerLastSeenChannelRef.current);
           customerLastSeenChannelRef.current = null;

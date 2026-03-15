@@ -315,21 +315,21 @@ export default function App() {
   useEffect(() => {
     // Supabase handles session persistence automatically with our configuration
     // Just listen for auth state changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // no password recovery handling inside app
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        // no password recovery handling inside app
 
-      const newUser = session?.user ?? null;
-      const newRole = normalizeRole(newUser?.user_metadata?.role || null);
+        const newUser = session?.user ?? null;
+        const newRole = normalizeRole(newUser?.user_metadata?.role || null);
 
-      setUser(newUser);
-      setUserRole(newRole);
-      setLoading(false);
+        setUser(newUser);
+        setUserRole(newRole);
+        setLoading(false);
 
-      // Store auth state for backup (optional)
-      await storeAuthState(newUser, newRole);
-    });
+        // Store auth state for backup (optional) without blocking auth callback.
+        storeAuthState(newUser, newRole);
+      },
+    );
 
     // Initial check
     const checkInitialAuth = async () => {
@@ -350,7 +350,9 @@ export default function App() {
 
     checkInitialAuth();
 
-    return () => subscription.unsubscribe();
+    return () => {
+      authListener?.subscription?.unsubscribe?.();
+    };
   }, []);
 
   const handleLogout = async () => {

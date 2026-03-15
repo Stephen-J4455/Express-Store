@@ -11,6 +11,7 @@ import {
   FlatList,
   RefreshControl,
   Modal,
+  Platform,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
@@ -99,11 +100,24 @@ export const ProfileScreen = () => {
   const [editApplyToCustomer, setEditApplyToCustomer] = useState(
     profile?.theme_apply_customer || profile?.theme_apply_customer_app || false,
   );
-  // Minimal payment modal state (used when Paystack requires bank details)
+  // Payment editor state
   const [paymentEditVisible, setPaymentEditVisible] = useState(false);
-  const [bankName, setBankName] = useState("");
-  const [bankAccount, setBankAccount] = useState("");
+  const [paymentType, setPaymentType] = useState("bank");
+  const [paymentCurrency, setPaymentCurrency] = useState("GHS");
+  const [paymentBankCode, setPaymentBankCode] = useState("");
+  const [paymentBankDropdownVisible, setPaymentBankDropdownVisible] =
+    useState(false);
+  const [paymentMobileProvider, setPaymentMobileProvider] = useState("mtn");
+  const [paymentAccount, setPaymentAccount] = useState("");
+  const [paymentDetailsLoading, setPaymentDetailsLoading] = useState(false);
+  const [paymentLoadError, setPaymentLoadError] = useState("");
+  const [loadingPaymentBanks, setLoadingPaymentBanks] = useState(false);
   const [paymentSaving, setPaymentSaving] = useState(false);
+  const [showFullPaymentAccount, setShowFullPaymentAccount] = useState(false);
+  const [securePromptVisible, setSecurePromptVisible] = useState(false);
+  const [securePassword, setSecurePassword] = useState("");
+  const [secureSubmitting, setSecureSubmitting] = useState(false);
+  const [secureAction, setSecureAction] = useState(null);
   // Paystack-supported banks (fetched from edge function). Start with a small fallback list.
   const DEFAULT_PAYSTACK_BANKS = [
     { code: "044", name: "Access Bank" },
@@ -116,6 +130,7 @@ export const ProfileScreen = () => {
     { code: "039", name: "Stanbic IBTC" },
   ];
   const [PAYSTACK_BANKS, setPAYSTACK_BANKS] = useState(DEFAULT_PAYSTACK_BANKS);
+  const MOBILE_MONEY_PROVIDERS = ["mtn", "airteltigo", "telecel"];
 
   // (store payments removed)
 
@@ -233,7 +248,9 @@ export const ProfileScreen = () => {
       )
       .subscribe();
 
-    return () => channel.unsubscribe();
+    return () => {
+      channel?.unsubscribe?.();
+    };
   }, [sellerId]);
 
   useEffect(() => {
@@ -266,6 +283,195 @@ export const ProfileScreen = () => {
   }, [profile, editing]);
 
   // store payments removed
+
+  const fetchPaymentBanks = async () => {
+    setLoadingPaymentBanks(true);
+    try {
+      const res = await invokeEdgeFunction("create_subaccount", {
+        action: "list_banks",
+        country: "ghana",
+      });
+      if (res?.data?.length) {
+        const seen = new Set();
+        const uniqueBanks = [];
+        for (const b of res.data) {
+          const code = String(b?.code || "").trim();
+          const name = String(b?.name || "").trim();
+          if (!code || !name) continue;
+          const key = code;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          uniqueBanks.push({ code, name });
+        }
+        setPAYSTACK_BANKS(uniqueBanks);
+      }
+    } catch (err) {
+      console.warn("Failed to load Paystack banks for payment editor:", err);
+    } finally {
+      setLoadingPaymentBanks(false);
+    }
+  };
+
+  const openPaymentEditor = async () => {
+    if (!sellerId) return;
+
+    setPaymentEditVisible(true);
+    setPaymentLoadError("");
+    setPaymentDetailsLoading(true);
+
+    // Defaults match the current setup flow.
+    setPaymentType("bank");
+    setPaymentCurrency("GHS");
+    setPaymentBankCode("");
+    setPaymentBankDropdownVisible(false);
+    setPaymentMobileProvider("mtn");
+    setPaymentAccount("");
+
+    try {
+      await fetchPaymentBanks();
+
+      if (
+        profile?.payment_platform === "paystack" &&
+        profile?.payment_account
+      ) {
+        const subaccountCandidates = [profile?.payment_account].filter(Boolean);
+
+        try {
+          let paystackData = null;
+          for (const subaccountCode of subaccountCandidates) {
+            try {
+              const paystackResp = await invokeEdgeFunction(
+                "create_subaccount",
+                {
+                  action: "get_subaccount",
+                  subaccount_code: subaccountCode,
+                },
+              );
+              if (paystackResp?.data) {
+                paystackData = paystackResp.data;
+                break;
+              }
+            } catch (innerErr) {
+              // Try the next candidate identifier.
+            }
+          }
+
+          if (paystackData) {
+            setPaymentCurrency("GHS");
+            await fetchPaymentBanks();
+
+            const settlementValue = String(
+              paystackData.settlement_bank || "",
+            ).toLowerCase();
+            const provider = MOBILE_MONEY_PROVIDERS.find(
+              (p) => p === settlementValue,
+            );
+            if (provider) {
+              setPaymentType("mobile_money");
+              setPaymentMobileProvider(provider);
+            } else if (settlementValue) {
+              setPaymentType("bank");
+              setPaymentBankCode(String(paystackData.settlement_bank));
+            }
+
+            if (paystackData.account_number) {
+              setPaymentAccount(String(paystackData.account_number));
+            }
+          } else {
+            setPaymentLoadError(
+              "Could not load existing details from Paystack. You can still update and save.",
+            );
+            if (profile?.account_code) {
+              setPaymentAccount(String(profile.account_code));
+            }
+          }
+        } catch (paystackErr) {
+          console.warn(
+            "Failed to load Paystack subaccount details:",
+            paystackErr,
+          );
+          if (profile?.account_code) {
+            setPaymentAccount(String(profile.account_code));
+          }
+          setPaymentLoadError(
+            "Could not load existing details from Paystack. You can still update and save.",
+          );
+        }
+      } else if (profile?.account_code) {
+        setPaymentAccount(String(profile.account_code));
+      }
+    } catch (err) {
+      console.error("Error loading payment details:", err);
+      setPaymentLoadError("Failed to load existing payment details.");
+    } finally {
+      setPaymentDetailsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!paymentEditVisible || paymentType !== "bank") return;
+    fetchPaymentBanks();
+  }, [paymentEditVisible, paymentType]);
+
+  const selectedPaymentBankName = useMemo(() => {
+    if (!paymentBankCode) return "";
+    const found = PAYSTACK_BANKS.find(
+      (b) => String(b.code) === String(paymentBankCode),
+    );
+    return found?.name || "";
+  }, [PAYSTACK_BANKS, paymentBankCode]);
+
+  const maskedPaymentAccount = useMemo(() => {
+    const raw = String(profile?.payment_account || "").trim();
+    if (!raw) return "No subaccount";
+    if (showFullPaymentAccount) return raw;
+    return `••••${raw.slice(-4)}`;
+  }, [profile?.payment_account, showFullPaymentAccount]);
+
+  const requestSecureAction = (action) => {
+    setSecureAction(action);
+    setSecurePassword("");
+    setSecurePromptVisible(true);
+  };
+
+  const runSecureAction = async () => {
+    if (!securePassword) {
+      toast.error("Enter password to continue");
+      return;
+    }
+
+    setSecureSubmitting(true);
+    try {
+      let email = profile?.email || "";
+      if (!email) {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        email = user?.email || "";
+      }
+      if (!email) throw new Error("Could not resolve account email");
+
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password: securePassword,
+      });
+      if (error) throw error;
+
+      setSecurePromptVisible(false);
+      setSecurePassword("");
+
+      if (secureAction === "edit") {
+        await openPaymentEditor();
+      } else if (secureAction === "reveal") {
+        setShowFullPaymentAccount(true);
+      }
+      setSecureAction(null);
+    } catch (err) {
+      toast.error(err?.message || "Password verification failed");
+    } finally {
+      setSecureSubmitting(false);
+    }
+  };
 
   // Compute rating fallback if SellerContext didn't provide one
   useEffect(() => {
@@ -321,7 +527,7 @@ export const ProfileScreen = () => {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 1,
@@ -333,15 +539,63 @@ export const ProfileScreen = () => {
 
   const uploadImage = async (uri) => {
     try {
-      const response = await fetch(uri);
-      const arrayBuffer = await response.arrayBuffer();
-      const ext = uri.split(".").pop() || "jpg";
+      const readImageBinary = async (imageUri) => {
+        if (Platform.OS === "web") {
+          const webResponse = await fetch(imageUri);
+          const webArrayBuffer = await webResponse.arrayBuffer();
+          return {
+            arrayBuffer: webArrayBuffer,
+            contentType: webResponse.headers.get("content-type") || null,
+          };
+        }
+
+        return await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.onload = () => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              resolve({
+                arrayBuffer: reader.result,
+                contentType: xhr.response.type,
+              });
+            };
+            reader.onerror = (e) => {
+              reject(new TypeError("Failed to read blob"));
+            };
+            reader.readAsArrayBuffer(xhr.response);
+          };
+          xhr.onerror = (e) => {
+            reject(new TypeError("Network request failed while reading image"));
+          };
+          xhr.responseType = "blob";
+          xhr.open("GET", imageUri, true);
+          xhr.send();
+        });
+      };
+
+      const { arrayBuffer, contentType: detectedContentType } =
+        await readImageBinary(uri);
+
+      const getImageExtension = (imageUri) => {
+        const cleanUri = imageUri?.split("?")[0] || "";
+        const fileNameSegment = cleanUri.split("/").pop() || "";
+        const ext = fileNameSegment.includes(".")
+          ? fileNameSegment.split(".").pop()?.toLowerCase()
+          : null;
+
+        if (!ext || ext.length > 5) return "jpg";
+        return ext === "jpeg" ? "jpg" : ext;
+      };
+
+      const ext = getImageExtension(uri);
       const fileName = `avatar-${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
       const fileData = new Uint8Array(arrayBuffer);
+      const contentType =
+        detectedContentType || `image/${ext === "jpg" ? "jpeg" : ext}`;
       const { data, error } = await supabase.storage
         .from("express-products")
         .upload(fileName, fileData, {
-          contentType: "image/jpeg",
+          contentType,
           cacheControl: "3600",
           upsert: false,
         });
@@ -647,18 +901,47 @@ export const ProfileScreen = () => {
                                 <View style={styles.visaChipGrid} />
                               </View>
                               <View style={styles.visaActivePill}>
-                                <View style={styles.visaActiveDot} />
+                                <View
+                                  style={[
+                                    styles.visaActiveDot,
+                                    !profile?.account_verified &&
+                                      styles.visaInactiveDot,
+                                  ]}
+                                />
                                 <Text style={styles.visaActiveText}>
-                                  Active
+                                  {profile?.account_verified
+                                    ? "Verified"
+                                    : "Unverified"}
                                 </Text>
                               </View>
                             </View>
 
                             {/* Card number */}
-                            <Text style={styles.visaCardNumber}>
-                              {"•••• •••• •••• " +
-                                (profile?.payment_account || "0000").slice(-4)}
-                            </Text>
+                            <View style={styles.visaNumberRow}>
+                              <Text style={styles.visaCardNumber}>
+                                {maskedPaymentAccount}
+                              </Text>
+                              <Pressable
+                                onPress={() => {
+                                  if (showFullPaymentAccount) {
+                                    setShowFullPaymentAccount(false);
+                                  } else {
+                                    requestSecureAction("reveal");
+                                  }
+                                }}
+                                style={styles.visaRevealBtn}
+                              >
+                                <Ionicons
+                                  name={
+                                    showFullPaymentAccount
+                                      ? "eye-off-outline"
+                                      : "eye-outline"
+                                  }
+                                  size={16}
+                                  color="#fff"
+                                />
+                              </Pressable>
+                            </View>
 
                             {/* Bottom: name + VISA logo */}
                             <View style={styles.visaBottomRow}>
@@ -670,30 +953,40 @@ export const ProfileScreen = () => {
                                   {profile?.name || "Business Account"}
                                 </Text>
                               </View>
-                              <Text style={styles.visaLogo}>
-                                {(profile?.payment_platform || "Paystack")
-                                  .toUpperCase()
-                                  .slice(0, 8)}
-                              </Text>
+                              <View style={{ alignItems: "flex-end" }}>
+                                <Text style={styles.visaLogo}>
+                                  {(profile?.payment_platform || "Paystack")
+                                    .toUpperCase()
+                                    .slice(0, 8)}
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.visaSubValue,
+                                    styles.visaSubValueRight,
+                                  ]}
+                                >
+                                  {profile?.account_code || "Not set"}
+                                </Text>
+                              </View>
                             </View>
                           </LinearGradient>
 
                           <Pressable
-                            onPress={() => setPaymentEditVisible(true)}
+                            onPress={() => requestSecureAction("edit")}
                             style={[
                               styles.visaEditButton,
-                              { borderColor: theme.primary },
+                              { borderColor: "#E2E8F0" },
                             ]}
                           >
                             <Ionicons
                               name="pencil-outline"
                               size={14}
-                              color={theme.primary}
+                              color={colors.dark}
                             />
                             <Text
                               style={[
                                 styles.visaEditText,
-                                { color: theme.primary },
+                                { color: colors.dark },
                               ]}
                             >
                               Edit Payment Info
@@ -723,32 +1016,151 @@ export const ProfileScreen = () => {
                           ? "Add Bank Details"
                           : "Edit Payment Details"}
                       </Text>
-                      <Text
-                        style={{
-                          color: "#6B7280",
-                          marginBottom: 16,
-                          fontSize: 13,
-                        }}
-                      >
+                      <Text style={styles.paymentHintText}>
                         {needsSubaccount
-                          ? "Add your bank details to receive payments."
-                          : "Update your bank details. Changes will be used for future payouts."}
+                          ? "Add your payout details to receive payments."
+                          : "Update your payout details. This updates both your saved payment profile and Paystack subaccount."}
                       </Text>
-                      <Text style={styles.label}>Bank name</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={bankName}
-                        onChangeText={setBankName}
-                        placeholder="e.g. XYZ Bank"
-                      />
-                      <Text style={styles.label}>Account number</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={bankAccount}
-                        onChangeText={setBankAccount}
-                        placeholder="Account number"
-                        keyboardType="numeric"
-                      />
+
+                      {paymentLoadError ? (
+                        <Text style={styles.paymentErrorText}>
+                          {paymentLoadError}
+                        </Text>
+                      ) : null}
+
+                      {paymentDetailsLoading ? (
+                        <View style={styles.paymentLoadingWrap}>
+                          <ActivityIndicator color={theme.primary} />
+                          <Text style={styles.paymentLoadingText}>
+                            Loading existing payment details...
+                          </Text>
+                        </View>
+                      ) : (
+                        <>
+                          <Text style={styles.label}>Payment type</Text>
+                          <View style={styles.typeList}>
+                            <Pressable
+                              style={[
+                                styles.typeBtn,
+                                styles.typeBtnFull,
+                                paymentType === "bank" && {
+                                  borderColor: theme.primary,
+                                },
+                              ]}
+                              onPress={() => setPaymentType("bank")}
+                            >
+                              <Ionicons
+                                name="business"
+                                size={20}
+                                color={
+                                  paymentType === "bank"
+                                    ? theme.primary
+                                    : colors.muted
+                                }
+                              />
+                              <Text style={styles.typeText}>Bank</Text>
+                            </Pressable>
+                            <Pressable
+                              style={[
+                                styles.typeBtn,
+                                styles.typeBtnFull,
+                                styles.typeBtnSpacing,
+                                paymentType === "mobile_money" && {
+                                  borderColor: theme.primary,
+                                },
+                              ]}
+                              onPress={() => setPaymentType("mobile_money")}
+                            >
+                              <Ionicons
+                                name="phone-portrait"
+                                size={20}
+                                color={
+                                  paymentType === "mobile_money"
+                                    ? theme.primary
+                                    : colors.muted
+                                }
+                              />
+                              <Text style={styles.typeText}>Mobile Money</Text>
+                            </Pressable>
+                          </View>
+
+                          <Text style={styles.label}>Currency</Text>
+                          <Text style={styles.paymentHintText}>GHS only</Text>
+
+                          {paymentType === "bank" ? (
+                            <>
+                              <Text style={styles.label}>Choose bank</Text>
+                              <Pressable
+                                style={styles.dropdownTrigger}
+                                onPress={() =>
+                                  !loadingPaymentBanks &&
+                                  setPaymentBankDropdownVisible(true)
+                                }
+                              >
+                                <Text
+                                  style={[
+                                    styles.dropdownValue,
+                                    !selectedPaymentBankName &&
+                                      styles.dropdownPlaceholder,
+                                  ]}
+                                >
+                                  {loadingPaymentBanks
+                                    ? "Loading banks..."
+                                    : selectedPaymentBankName || "Select bank"}
+                                </Text>
+                                <Ionicons
+                                  name="chevron-down"
+                                  size={18}
+                                  color={colors.muted}
+                                />
+                              </Pressable>
+                            </>
+                          ) : (
+                            <>
+                              <Text style={styles.label}>Choose provider</Text>
+                              <View style={styles.typeList}>
+                                {MOBILE_MONEY_PROVIDERS.map((p) => (
+                                  <Pressable
+                                    key={p}
+                                    style={[
+                                      styles.typeBtn,
+                                      styles.typeBtnFull,
+                                      styles.typeBtnSpacing,
+                                      paymentMobileProvider === p && {
+                                        borderColor: theme.primary,
+                                      },
+                                    ]}
+                                    onPress={() => setPaymentMobileProvider(p)}
+                                  >
+                                    <Text style={styles.typeText}>
+                                      {p.toUpperCase()}
+                                    </Text>
+                                  </Pressable>
+                                ))}
+                              </View>
+                            </>
+                          )}
+
+                          <Text style={styles.label}>
+                            {paymentType === "bank"
+                              ? "Account number"
+                              : "Phone number"}
+                          </Text>
+                          <TextInput
+                            style={styles.input}
+                            value={paymentAccount}
+                            onChangeText={setPaymentAccount}
+                            placeholder={
+                              paymentType === "bank"
+                                ? "Account number"
+                                : "e.g. +233..."
+                            }
+                            keyboardType={
+                              paymentType === "bank" ? "numeric" : "phone-pad"
+                            }
+                          />
+                        </>
+                      )}
 
                       <View
                         style={{
@@ -773,63 +1185,79 @@ export const ProfileScreen = () => {
                             if (!sellerId) return;
                             setPaymentSaving(true);
                             try {
-                              // If bank name matches a known PAYSTACK_BANKS entry, store the bank code instead
-                              const matched = PAYSTACK_BANKS.find(
-                                (b) =>
-                                  b.name.toLowerCase() ===
-                                  (bankName || "").toLowerCase(),
-                              );
-                              const bankValueToStore = matched
-                                ? matched.code
-                                : bankName || null;
+                              const selectedSettlement =
+                                paymentType === "bank"
+                                  ? paymentBankCode
+                                  : paymentMobileProvider;
+                              const normalizedAccount = String(
+                                paymentAccount || "",
+                              )
+                                .replace(/\D/g, "")
+                                .trim();
 
-                              const payload = {
-                                seller_id: sellerId,
-                                type: "bank",
-                                bank_name: bankValueToStore,
-                                account_number: bankAccount || null,
-                                account_name: null,
-                                is_primary: true,
-                              };
-                              const { data: existing } = await supabase
-                                .from("store_payments")
-                                .select("id")
-                                .eq("seller_id", sellerId)
-                                .eq("type", "bank")
-                                .maybeSingle();
-                              if (existing?.id) {
-                                await supabase
-                                  .from("store_payments")
-                                  .update(payload)
-                                  .eq("id", existing.id);
-                              } else {
-                                await supabase
-                                  .from("store_payments")
-                                  .insert(payload);
+                              if (!selectedSettlement) {
+                                toast.error(
+                                  paymentType === "bank"
+                                    ? "Select a bank"
+                                    : "Select a mobile money provider",
+                                );
+                                return;
                               }
-                              setPaymentEditVisible(false);
-                              // Retry creating the Paystack subaccount now that bank details exist
+                              if (!normalizedAccount) {
+                                toast.error(
+                                  paymentType === "bank"
+                                    ? "Enter account number"
+                                    : "Enter phone number",
+                                );
+                                return;
+                              }
+                              if (
+                                paymentType === "bank" &&
+                                normalizedAccount.length !== 13
+                              ) {
+                                toast.error(
+                                  "Bank account number must be 13 digits for GHS",
+                                );
+                                return;
+                              }
+                              if (
+                                paymentType === "mobile_money" &&
+                                (normalizedAccount.length < 10 ||
+                                  normalizedAccount.length > 13)
+                              ) {
+                                toast.error(
+                                  "Mobile money number must be 10 to 13 digits",
+                                );
+                                return;
+                              }
+
                               try {
                                 setCreatingSubaccount(true);
                                 await createPaystackSubaccount({
-                                  settlement_bank: bankValueToStore,
-                                  account_number: bankAccount,
+                                  settlement_bank: selectedSettlement,
+                                  account_number: normalizedAccount,
+                                  type: paymentType,
+                                  currency: paymentCurrency,
                                 });
-                                toast.success("Paystack subaccount created");
+                                setPaymentEditVisible(false);
+                                toast.success("Payment details updated");
                               } catch (err) {
                                 console.error(
                                   "Retry subaccount creation failed:",
                                   err,
                                 );
                                 toast.error(
-                                  "Failed to create Paystack subaccount after saving bank details",
+                                  "Failed to update Paystack payment details",
                                 );
                               } finally {
                                 setCreatingSubaccount(false);
                               }
                             } catch (err) {
-                              console.error("Error saving bank details:", err);
-                              toast.error("Failed to save bank details");
+                              console.error(
+                                "Error saving payment details:",
+                                err,
+                              );
+                              toast.error("Failed to update payment details");
                             } finally {
                               setPaymentSaving(false);
                             }
@@ -838,6 +1266,7 @@ export const ProfileScreen = () => {
                             styles.saveButton,
                             { backgroundColor: theme.primary },
                           ]}
+                          disabled={paymentDetailsLoading || paymentSaving}
                         >
                           {paymentSaving ? (
                             <ActivityIndicator color="#fff" />
@@ -850,6 +1279,112 @@ export const ProfileScreen = () => {
                       </View>
                     </View>
                   </ScrollView>
+                </Modal>
+
+                <Modal
+                  visible={paymentBankDropdownVisible}
+                  transparent
+                  animationType="fade"
+                  onRequestClose={() => setPaymentBankDropdownVisible(false)}
+                >
+                  <Pressable
+                    style={styles.dropdownBackdrop}
+                    onPress={() => setPaymentBankDropdownVisible(false)}
+                  >
+                    <View style={styles.dropdownSheet}>
+                      <Text style={styles.dropdownTitle}>Select bank</Text>
+                      <ScrollView style={styles.dropdownList}>
+                        {PAYSTACK_BANKS.map((b, idx) => (
+                          <Pressable
+                            key={`${String(b.code)}-${String(b.name)}-${idx}`}
+                            style={styles.dropdownItem}
+                            onPress={() => {
+                              setPaymentBankCode(String(b.code));
+                              setPaymentBankDropdownVisible(false);
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.dropdownItemText,
+                                paymentBankCode === String(b.code) && {
+                                  color: theme.primary,
+                                },
+                              ]}
+                            >
+                              {b.name}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  </Pressable>
+                </Modal>
+
+                <Modal
+                  visible={securePromptVisible}
+                  transparent
+                  animationType="fade"
+                  onRequestClose={() => {
+                    setSecurePromptVisible(false);
+                    setSecurePassword("");
+                    setSecureAction(null);
+                  }}
+                >
+                  <Pressable
+                    style={styles.dropdownBackdrop}
+                    onPress={() => {
+                      setSecurePromptVisible(false);
+                      setSecurePassword("");
+                      setSecureAction(null);
+                    }}
+                  >
+                    <Pressable style={styles.dropdownSheet} onPress={() => {}}>
+                      <Text style={styles.dropdownTitle}>Confirm Password</Text>
+                      <Text style={styles.paymentHintText}>
+                        Enter your password to continue.
+                      </Text>
+                      <TextInput
+                        style={styles.input}
+                        value={securePassword}
+                        onChangeText={setSecurePassword}
+                        secureTextEntry
+                        autoCapitalize="none"
+                        placeholder="Password"
+                      />
+                      <View style={styles.secureActionsRow}>
+                        <Pressable
+                          style={styles.cancelButton}
+                          onPress={() => {
+                            setSecurePromptVisible(false);
+                            setSecurePassword("");
+                            setSecureAction(null);
+                          }}
+                        >
+                          <Text
+                            style={{ color: colors.muted, fontWeight: "700" }}
+                          >
+                            Cancel
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          style={[
+                            styles.saveButton,
+                            { backgroundColor: theme.primary },
+                          ]}
+                          onPress={runSecureAction}
+                          disabled={secureSubmitting}
+                        >
+                          {secureSubmitting ? (
+                            <ActivityIndicator color="#fff" />
+                          ) : (
+                            <Text style={{ color: "#fff", fontWeight: "800" }}>
+                              Continue
+                            </Text>
+                          )}
+                        </Pressable>
+                      </View>
+                    </Pressable>
+                  </Pressable>
                 </Modal>
 
                 {/* Weekly Target Progress */}
@@ -1921,6 +2456,9 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: "#10B981",
   },
+  visaInactiveDot: {
+    backgroundColor: "#F59E0B",
+  },
   visaActiveText: {
     color: "#fff",
     fontSize: 11,
@@ -1932,6 +2470,22 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 3,
     textAlign: "center",
+  },
+  visaNumberRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  visaRevealBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.3)",
   },
   visaBottomRow: {
     flexDirection: "row",
@@ -1951,6 +2505,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
+  visaSubValue: {
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 3,
+  },
+  visaSubValueRight: {
+    textAlign: "right",
+  },
   visaLogo: {
     color: "#fff",
     fontSize: 20,
@@ -1965,12 +2528,19 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 12,
     marginTop: 8,
+    backgroundColor: "#fff",
     borderTopWidth: 1,
     borderTopColor: "#F1F5F9",
   },
   visaEditText: {
     fontSize: 13,
     fontWeight: "700",
+  },
+  secureActionsRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 12,
+    marginTop: 14,
   },
   paymentEditButton: {
     backgroundColor: "#fff",
@@ -1989,6 +2559,103 @@ const styles = StyleSheet.create({
   paymentTabText: {
     fontWeight: "700",
     color: colors.muted,
+  },
+  paymentHintText: {
+    color: "#6B7280",
+    marginBottom: 12,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  paymentErrorText: {
+    color: "#B91C1C",
+    fontSize: 13,
+    marginBottom: 12,
+  },
+  paymentLoadingWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 24,
+    gap: 10,
+  },
+  paymentLoadingText: {
+    color: colors.muted,
+    fontSize: 13,
+  },
+  typeList: {
+    flexDirection: "column",
+    marginTop: 8,
+  },
+  typeBtn: {
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#D8DDE8",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    flexDirection: "row",
+  },
+  typeBtnFull: {
+    width: "100%",
+  },
+  typeBtnSpacing: {
+    marginTop: 10,
+  },
+  typeText: {
+    marginLeft: 12,
+    fontWeight: "700",
+    color: colors.dark,
+  },
+  dropdownTrigger: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "#D8DDE8",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: "#fff",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  dropdownValue: {
+    color: colors.dark,
+    fontWeight: "600",
+  },
+  dropdownPlaceholder: {
+    color: colors.muted,
+    fontWeight: "500",
+  },
+  dropdownBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.35)",
+    justifyContent: "flex-end",
+  },
+  dropdownSheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 24,
+    maxHeight: "65%",
+  },
+  dropdownTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.dark,
+    marginBottom: 12,
+  },
+  dropdownList: {
+    maxHeight: 420,
+  },
+  dropdownItem: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F7",
+  },
+  dropdownItemText: {
+    color: colors.dark,
+    fontWeight: "600",
   },
   smallChip: {
     paddingHorizontal: 10,

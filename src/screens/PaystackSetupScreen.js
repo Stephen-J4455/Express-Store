@@ -76,11 +76,37 @@ export const PaystackSetupScreen = ({ navigation }) => {
   };
 
   const onCreate = async () => {
+    const normalizedAccount = String(account || "")
+      .replace(/\D/g, "")
+      .trim();
+    if (!normalizedAccount) {
+      toast.error(
+        type === "bank" ? "Enter account number" : "Enter phone number",
+      );
+      return;
+    }
+    if (type === "bank") {
+      const expectedLen = currency === "GHS" ? 13 : 10;
+      if (normalizedAccount.length !== expectedLen) {
+        toast.error(
+          `Account number must be ${expectedLen} digits for ${currency}`,
+        );
+        return;
+      }
+    }
+    if (
+      type === "mobile_money" &&
+      (normalizedAccount.length < 10 || normalizedAccount.length > 13)
+    ) {
+      toast.error("Mobile money number must be 10 to 13 digits");
+      return;
+    }
+
     try {
       setCreating(true);
       await createPaystackSubaccount({
         settlement_bank: type === "bank" ? bankCode : mobileProvider,
-        account_number: account,
+        account_number: normalizedAccount,
         type,
         currency,
       });

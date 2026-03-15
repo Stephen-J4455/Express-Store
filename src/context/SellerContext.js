@@ -83,16 +83,23 @@ export const SellerProvider = ({ children }) => {
         await updateLastSeen(currentSellerId);
       }
 
-      if (!presenceChannelRef.current) return;
+      const channel = presenceChannelRef.current;
+      if (!channel) return;
+
+      // Clear ref first to avoid races when stopPresence is called concurrently.
+      presenceChannelRef.current = null;
 
       try {
-        await presenceChannelRef.current.untrack();
+        await channel.untrack();
       } catch (error) {
         console.warn("Seller presence untrack failed:", error);
       }
 
-      supabase.removeChannel(presenceChannelRef.current);
-      presenceChannelRef.current = null;
+      try {
+        supabase.removeChannel(channel);
+      } catch (error) {
+        console.warn("Seller presence channel removal failed:", error);
+      }
     },
     [updateLastSeen],
   );
@@ -170,41 +177,16 @@ export const SellerProvider = ({ children }) => {
             (async () => {
               try {
                 if (created && created.id) {
-                  // Try to include bank details from `store_payments` if the seller has them
-                  try {
-                    const { data: bank, error: bankErr } = await supabase
-                      .from("store_payments")
-                      .select("*")
-                      .eq("seller_id", created.id)
-                      .eq("type", "bank")
-                      .maybeSingle();
+                  const payload = {
+                    seller_id: created.id,
+                    name: created.name,
+                    email: user.email,
+                  };
+                  // include phone if available
+                  if (user.user_metadata?.phone)
+                    payload.primary_contact_phone = user.user_metadata.phone;
 
-                    const payload = {
-                      seller_id: created.id,
-                      name: created.name,
-                      email: user.email,
-                    };
-                    if (bank && !bankErr) {
-                      payload.settlement_bank = bank.bank_name || null;
-                      payload.account_number = bank.account_number || null;
-                    }
-                    // include phone if available
-                    if (user.user_metadata?.phone)
-                      payload.primary_contact_phone = user.user_metadata.phone;
-
-                    await invokeEdgeFunction("create_subaccount", payload);
-                  } catch (innerErr) {
-                    console.warn(
-                      "Failed to fetch store_payments for subaccount creation:",
-                      innerErr,
-                    );
-                    // fallback to minimal payload
-                    await invokeEdgeFunction("create_subaccount", {
-                      seller_id: created.id,
-                      name: created.name,
-                      email: user.email,
-                    });
-                  }
+                  await invokeEdgeFunction("create_subaccount", payload);
                 }
               } catch (err) {
                 console.warn(
@@ -483,35 +465,19 @@ export const SellerProvider = ({ children }) => {
       if (!ensured) throw new Error("Seller not found");
 
       try {
-        // If caller didn't provide bank details, try to load primary bank from `store_payments`.
-        let settlement_bank = opts.settlement_bank;
-        let account_number = opts.account_number;
-        if (!settlement_bank || !account_number) {
-          try {
-            const { data: bank, error: bankErr } = await supabase
-              .from("store_payments")
-              .select("*")
-              .eq("seller_id", ensured)
-              .eq("type", "bank")
-              .maybeSingle();
-            if (!bankErr && bank) {
-              settlement_bank = settlement_bank || bank.bank_name || null;
-              account_number = account_number || bank.account_number || null;
-            }
-          } catch (bankFetchErr) {
-            console.warn(
-              "Failed to fetch bank details from store_payments:",
-              bankFetchErr,
-            );
-          }
-        }
+        const settlement_bank = opts.settlement_bank;
+        const account_number = opts.account_number;
 
         const resp = await invokeEdgeFunction("create_subaccount", {
           seller_id: ensured,
           name: profile?.name || opts.name || null,
           email: profile?.email || opts.email || null,
+          subaccount_code:
+            opts.subaccount_code || profile?.payment_account || null,
           settlement_bank,
           account_number,
+          type: opts.type,
+          currency: opts.currency,
           primary_contact_phone: opts.primary_contact_phone,
         });
 
@@ -669,10 +635,10 @@ export const SellerProvider = ({ children }) => {
       .subscribe();
 
     return () => {
-      ordersChannel.unsubscribe();
-      productsChannel.unsubscribe();
-      flashSalesChannel.unsubscribe();
-      chatsChannel.unsubscribe();
+      ordersChannel?.unsubscribe?.();
+      productsChannel?.unsubscribe?.();
+      flashSalesChannel?.unsubscribe?.();
+      chatsChannel?.unsubscribe?.();
     };
   }, [sellerId, fetchChats]);
 

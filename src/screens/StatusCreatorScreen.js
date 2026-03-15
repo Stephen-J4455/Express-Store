@@ -92,7 +92,7 @@ export const StatusCreatorScreen = ({ navigation }) => {
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       allowsEditing: true,
       aspect: [9, 16],
       quality: 0.8,
@@ -139,14 +139,47 @@ export const StatusCreatorScreen = ({ navigation }) => {
   };
 
   const uploadStatusImage = async (uri) => {
-    const response = await fetch(uri);
-    const arrayBuffer = await response.arrayBuffer();
+    const readImageBinary = async (imageUri) => {
+      if (Platform.OS === "web") {
+        const webResponse = await fetch(imageUri);
+        const webArrayBuffer = await webResponse.arrayBuffer();
+        return {
+          arrayBuffer: webArrayBuffer,
+          contentType: webResponse.headers.get("content-type") || null,
+        };
+      }
+
+      return await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.onload = () => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            resolve({
+              arrayBuffer: reader.result,
+              contentType: xhr.response.type,
+            });
+          };
+          reader.onerror = (e) => {
+            reject(new TypeError("Failed to read blob"));
+          };
+          reader.readAsArrayBuffer(xhr.response);
+        };
+        xhr.onerror = (e) => {
+          reject(new TypeError("Network request failed while reading image"));
+        };
+        xhr.responseType = "blob";
+        xhr.open("GET", imageUri, true);
+        xhr.send();
+      });
+    };
+
+    const { arrayBuffer, contentType: detectedContentType } =
+      await readImageBinary(uri);
     const fileData = new Uint8Array(arrayBuffer);
     const ext = getImageExtension(uri);
     const fileName = `${sellerId}/${Date.now()}.${ext}`;
     const contentType =
-      response.headers.get("content-type") ||
-      `image/${ext === "jpg" ? "jpeg" : ext}`;
+      detectedContentType || `image/${ext === "jpg" ? "jpeg" : ext}`;
 
     const { error } = await supabase.storage
       .from("seller-statuses")

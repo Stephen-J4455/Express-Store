@@ -78,26 +78,6 @@ export const ProductCard = ({
             <Text style={styles.metaText}>Stock: {product.quantity || 0}</Text>
           </View>
         </View>
-
-        {product.badges && product.badges.length > 0 && (
-          <View style={styles.footer}>
-            <View style={styles.badges}>
-              {product.badges.slice(0, 2).map((badge) => (
-                <View
-                  key={badge}
-                  style={[
-                    styles.badge,
-                    { backgroundColor: theme.primary + "15" },
-                  ]}
-                >
-                  <Text style={[styles.badgeText, { color: theme.primary }]}>
-                    {badge}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
       </View>
     </Pressable>
   );
@@ -198,30 +178,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: -0.2,
-  },
-  footer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#F1F5F9",
-  },
-  badges: {
-    flexDirection: "row",
-    gap: 6,
-    flex: 1,
-  },
-  badge: {
-    backgroundColor: colors.primaryLight,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  badgeText: {
-    fontSize: 11,
-    color: colors.primary,
-    fontWeight: "600",
   },
   discountOverlay: {
     position: "absolute",
