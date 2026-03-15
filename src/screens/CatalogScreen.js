@@ -18,7 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system";
+import { File } from "expo-file-system";
 import { Ionicons } from "@expo/vector-icons";
 import { useSeller } from "../context/SellerContext";
 import { useToast } from "../context/ToastContext";
@@ -245,39 +245,23 @@ const CatalogScreen = () => {
     try {
       const readImageBinary = async (imageUri) => {
         if (Platform.OS === "web") {
-          const webResponse = await fetch(imageUri);
-          const webArrayBuffer = await webResponse.arrayBuffer();
+          const response = await fetch(imageUri);
+          const arrayBuffer = await response.arrayBuffer();
+
           return {
-            arrayBuffer: webArrayBuffer,
-            contentType: webResponse.headers.get("content-type") || null,
+            fileData: arrayBuffer,
+            contentType: response.headers.get("content-type") || null,
           };
         }
+        const arrayBuffer = await new File(imageUri).arrayBuffer();
 
-        return await new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.onload = () => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              resolve({
-                arrayBuffer: reader.result,
-                contentType: xhr.response.type,
-              });
-            };
-            reader.onerror = (e) => {
-              reject(new TypeError("Failed to read blob"));
-            };
-            reader.readAsArrayBuffer(xhr.response);
-          };
-          xhr.onerror = (e) => {
-            reject(new TypeError("Network request failed while reading image"));
-          };
-          xhr.responseType = "blob";
-          xhr.open("GET", imageUri, true);
-          xhr.send();
-        });
+        return {
+          fileData: arrayBuffer,
+          contentType: null,
+        };
       };
 
-      const { arrayBuffer, contentType: detectedContentType } =
+      const { fileData, contentType: detectedContentType } =
         await readImageBinary(uri);
 
       const getImageExtension = (imageUri) => {
@@ -298,9 +282,6 @@ const CatalogScreen = () => {
         .substring(7)}.${ext}`;
       const contentType =
         detectedContentType || `image/${ext === "jpg" ? "jpeg" : ext}`;
-
-      // Convert ArrayBuffer to Uint8Array for upload
-      const fileData = new Uint8Array(arrayBuffer);
 
       // Upload to Supabase Storage
       const { data, error } = await supabase.storage

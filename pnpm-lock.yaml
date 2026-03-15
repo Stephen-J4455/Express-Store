@@ -29,6 +29,9 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.86.0
         version: 2.95.3
+      base64-arraybuffer:
+        specifier: ^1.0.2
+        version: 1.0.2
       expo:
         specifier: ^55.0.0
         version: 55.0.5(@babel/core@7.29.0)(@expo/dom-webview@55.0.3)(react-dom@19.2.0(react@19.2.0))(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)(typescript@5.9.3)
@@ -38,6 +41,9 @@ importers:
       expo-device:
         specifier: ^55.0.9
         version: 55.0.9(expo@55.0.5)
+      expo-file-system:
+        specifier: ^55.0.10
+        version: 55.0.10(expo@55.0.5)(react-native@0.83.2(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))
       expo-image-picker:
         specifier: ~55.0.12
         version: 55.0.12(expo@55.0.5)
@@ -1167,6 +1173,10 @@ packages:
   balanced-match@4.0.2:
     resolution: {integrity: sha512-x0K50QvKQ97fdEz2kPehIerj+YTeptKF9hyYkKf6egnwmMWAkADiO0QCzSp0R5xN8FTZgYaBfSaue46Ej62nMg==}
     engines: {node: 20 || >=22}
+
+  base64-arraybuffer@1.0.2:
+    resolution: {integrity: sha512-I3yl4r9QB5ZRY3XuJVEPfc2XhZO6YweFPI+UovAzn+8/hb3oJ6lnysaFcjVpkCPfVWFUDvoZ8kmVDP7WyRtYtQ==}
+    engines: {node: '>= 0.6.0'}
 
   base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
@@ -4342,6 +4352,8 @@ snapshots:
   balanced-match@4.0.2:
     dependencies:
       jackspeak: 4.2.3
+
+  base64-arraybuffer@1.0.2: {}
 
   base64-js@1.5.1: {}
 

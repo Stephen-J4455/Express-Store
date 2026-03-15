@@ -17,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+import { File } from "expo-file-system";
 import { supabase } from "../../supabase";
 import { colors, getTheme } from "../theme/colors";
 import { useSeller } from "../context/SellerContext";
@@ -141,41 +142,24 @@ export const StatusCreatorScreen = ({ navigation }) => {
   const uploadStatusImage = async (uri) => {
     const readImageBinary = async (imageUri) => {
       if (Platform.OS === "web") {
-        const webResponse = await fetch(imageUri);
-        const webArrayBuffer = await webResponse.arrayBuffer();
+        const response = await fetch(imageUri);
+        const arrayBuffer = await response.arrayBuffer();
+
         return {
-          arrayBuffer: webArrayBuffer,
-          contentType: webResponse.headers.get("content-type") || null,
+          fileData: arrayBuffer,
+          contentType: response.headers.get("content-type") || null,
         };
       }
+      const arrayBuffer = await new File(imageUri).arrayBuffer();
 
-      return await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.onload = () => {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            resolve({
-              arrayBuffer: reader.result,
-              contentType: xhr.response.type,
-            });
-          };
-          reader.onerror = (e) => {
-            reject(new TypeError("Failed to read blob"));
-          };
-          reader.readAsArrayBuffer(xhr.response);
-        };
-        xhr.onerror = (e) => {
-          reject(new TypeError("Network request failed while reading image"));
-        };
-        xhr.responseType = "blob";
-        xhr.open("GET", imageUri, true);
-        xhr.send();
-      });
+      return {
+        fileData: arrayBuffer,
+        contentType: null,
+      };
     };
 
-    const { arrayBuffer, contentType: detectedContentType } =
+    const { fileData, contentType: detectedContentType } =
       await readImageBinary(uri);
-    const fileData = new Uint8Array(arrayBuffer);
     const ext = getImageExtension(uri);
     const fileName = `${sellerId}/${Date.now()}.${ext}`;
     const contentType =
