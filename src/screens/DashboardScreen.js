@@ -2,10 +2,13 @@ import { LinearGradient } from "expo-linear-gradient";
 import React, { useState, useMemo } from "react";
 import { BarChart, LineChart, PieChart } from "react-native-gifted-charts";
 import {
+  Alert,
+  ActivityIndicator,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   TouchableOpacity,
   Dimensions,
@@ -36,6 +39,7 @@ export const DashboardScreen = () => {
     refresh,
     loading,
     logout,
+    deleteAccount,
     profile,
     updateProfile,
   } = useSeller();
@@ -44,6 +48,9 @@ export const DashboardScreen = () => {
     : getTheme(colors.primary);
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [selectedThemeId, setSelectedThemeId] = useState(null);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
   const [applyToStore, setApplyToStore] = useState(
     profile?.theme_apply_store || false,
   );
@@ -70,6 +77,44 @@ export const DashboardScreen = () => {
       console.error("Failed to update theme:", err);
     } finally {
       setShowThemeModal(false);
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "Delete Account",
+      "This permanently deletes your seller account and cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Continue",
+          style: "destructive",
+          onPress: () => setShowDeleteModal(true),
+        },
+      ],
+    );
+  };
+
+  const confirmDeleteWithPassword = async () => {
+    if (!deletePassword) {
+      Alert.alert("Password Required", "Enter your current password.");
+      return;
+    }
+
+    try {
+      setIsDeletingAccount(true);
+      const { error } = await deleteAccount(deletePassword);
+      if (error) {
+        Alert.alert(
+          "Delete Failed",
+          error.message || "Please try again later.",
+        );
+        return;
+      }
+      setShowDeleteModal(false);
+      setDeletePassword("");
+    } finally {
+      setIsDeletingAccount(false);
     }
   };
   const latestOrders = orders.slice(0, 3);
@@ -129,11 +174,22 @@ export const DashboardScreen = () => {
                 Monitoring your store's performance and fulfillment.
               </Text>
             </View>
-            {logout && (
-              <TouchableOpacity onPress={logout} style={styles.logoutButton}>
-                <Ionicons name="log-out-outline" size={24} color="#fff" />
-              </TouchableOpacity>
-            )}
+            <View style={styles.heroHeaderButtons}>
+              {deleteAccount && (
+                <TouchableOpacity
+                  onPress={handleDeleteAccount}
+                  style={styles.logoutButton}
+                  disabled={isDeletingAccount}
+                >
+                  <Ionicons name="trash-outline" size={22} color="#fff" />
+                </TouchableOpacity>
+              )}
+              {logout && (
+                <TouchableOpacity onPress={logout} style={styles.logoutButton}>
+                  <Ionicons name="log-out-outline" size={24} color="#fff" />
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
 
           <View style={styles.heroActions}>
@@ -749,6 +805,55 @@ export const DashboardScreen = () => {
           </View>
         )}
       </ScrollView>
+
+      <Modal
+        transparent
+        visible={showDeleteModal}
+        animationType="fade"
+        onRequestClose={() => setShowDeleteModal(false)}
+      >
+        <View style={styles.deleteModalBackdrop}>
+          <View style={styles.deleteModalCard}>
+            <Text style={styles.deleteModalTitle}>Confirm With Password</Text>
+            <Text style={styles.deleteModalText}>
+              Enter your current password to permanently delete this seller
+              account.
+            </Text>
+            <TextInput
+              style={styles.deleteModalInput}
+              secureTextEntry
+              autoCapitalize="none"
+              value={deletePassword}
+              onChangeText={setDeletePassword}
+              placeholder="Current password"
+              placeholderTextColor={colors.muted}
+            />
+            <View style={styles.deleteModalActions}>
+              <Pressable
+                onPress={() => {
+                  setShowDeleteModal(false);
+                  setDeletePassword("");
+                }}
+                disabled={isDeletingAccount}
+                style={styles.deleteModalCancel}
+              >
+                <Text style={styles.deleteModalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={confirmDeleteWithPassword}
+                disabled={isDeletingAccount}
+                style={styles.deleteModalDelete}
+              >
+                {isDeletingAccount ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.deleteModalDeleteText}>Delete</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ResponsiveContainer>
   );
 };
@@ -802,6 +907,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
+  },
+  heroHeaderButtons: {
+    flexDirection: "row",
+    gap: 8,
   },
   heroKicker: {
     color: "rgba(255,255,255,0.7)",
@@ -938,6 +1047,62 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 11,
     textAlign: "center",
+  },
+  deleteModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  deleteModalCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 16,
+  },
+  deleteModalTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: colors.dark,
+    marginBottom: 8,
+  },
+  deleteModalText: {
+    fontSize: 14,
+    color: colors.muted,
+    marginBottom: 12,
+  },
+  deleteModalInput: {
+    borderWidth: 1,
+    borderColor: colors.light,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: colors.dark,
+  },
+  deleteModalActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginTop: 14,
+  },
+  deleteModalCancel: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  deleteModalCancelText: {
+    color: colors.muted,
+    fontWeight: "600",
+  },
+  deleteModalDelete: {
+    backgroundColor: colors.accent,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    minWidth: 88,
+    alignItems: "center",
+  },
+  deleteModalDeleteText: {
+    color: "#fff",
+    fontWeight: "700",
   },
   cardGrid: {
     flexDirection: "row",

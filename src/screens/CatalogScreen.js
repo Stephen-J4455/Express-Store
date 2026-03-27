@@ -91,6 +91,9 @@ const CatalogScreen = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [viewingProduct, setViewingProduct] = useState(null);
+  const [restockModalVisible, setRestockModalVisible] = useState(false);
+  const [restockQuantity, setRestockQuantity] = useState("");
+  const [restockSubmitting, setRestockSubmitting] = useState(false);
 
   const AVAILABLE_COLORS = [
     { name: "Black", hex: "#000000" },
@@ -340,10 +343,50 @@ const CatalogScreen = () => {
           selectedProduct.status === "active" ? "draft" : "pending",
         );
         break;
+      case "restock":
+        setRestockQuantity("");
+        setRestockModalVisible(true);
+        break;
       case "flash_sale":
         // Navigate to flash sale screen
         navigation.navigate("FlashSale", { product: selectedProduct });
         break;
+    }
+  };
+
+  const handleRestock = async () => {
+    if (!selectedProduct) return;
+
+    const parsedQty = parseInt(restockQuantity, 10);
+    if (Number.isNaN(parsedQty) || parsedQty <= 0) {
+      toast.warning("Invalid quantity", "Enter a positive restock amount.");
+      return;
+    }
+
+    try {
+      setRestockSubmitting(true);
+      const currentQty = parseInt(selectedProduct.quantity || 0, 10) || 0;
+      const nextQty = currentQty + parsedQty;
+
+      await updateProduct(selectedProduct.id, {
+        quantity: nextQty,
+      });
+
+      setSelectedProduct((prev) =>
+        prev ? { ...prev, quantity: nextQty } : prev,
+      );
+      setViewingProduct((prev) =>
+        prev && prev.id === selectedProduct.id
+          ? { ...prev, quantity: nextQty }
+          : prev,
+      );
+      setRestockModalVisible(false);
+      setRestockQuantity("");
+      toast.success("Restocked", `Stock updated to ${nextQty}`);
+    } catch (error) {
+      toast.error("Restock Failed", error.message || "Please try again.");
+    } finally {
+      setRestockSubmitting(false);
     }
   };
 
@@ -1555,6 +1598,20 @@ const CatalogScreen = () => {
 
                 <Pressable
                   style={styles.actionSheetButton}
+                  onPress={() => handleActionSheetAction("restock")}
+                >
+                  <Ionicons name="cube-outline" size={22} color="#2563EB" />
+                  <Text
+                    style={[styles.actionSheetButtonText, { color: "#2563EB" }]}
+                  >
+                    {Number(selectedProduct?.quantity || 0) <= 0
+                      ? "Restock Product"
+                      : "Add Stock"}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  style={styles.actionSheetButton}
                   onPress={() => handleActionSheetAction("toggle_status")}
                 >
                   <Ionicons
@@ -1588,6 +1645,76 @@ const CatalogScreen = () => {
                 </Pressable>
               </Pressable>
             </View>
+          </Pressable>
+        </Modal>
+
+        <Modal
+          visible={restockModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setRestockModalVisible(false)}
+        >
+          <Pressable
+            style={styles.restockOverlay}
+            onPress={() => setRestockModalVisible(false)}
+          >
+            <Pressable
+              style={styles.restockCard}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <Text style={styles.restockTitle}>Restock Product</Text>
+              <Text style={styles.restockSubtitle}>
+                {selectedProduct?.title}
+              </Text>
+              <Text style={styles.restockCurrentQty}>
+                Current stock: {selectedProduct?.quantity || 0}
+              </Text>
+
+              <Text style={styles.label}>Quantity to add</Text>
+              <View style={styles.inputContainer}>
+                <Ionicons
+                  name="add-circle-outline"
+                  size={20}
+                  color={colors.muted}
+                  style={styles.inputIcon}
+                />
+                <TextInput
+                  placeholder="e.g., 20"
+                  keyboardType="numeric"
+                  value={restockQuantity}
+                  onChangeText={setRestockQuantity}
+                  style={styles.input}
+                />
+              </View>
+
+              <View style={styles.restockActions}>
+                <Pressable
+                  style={styles.restockCancelBtn}
+                  onPress={() => setRestockModalVisible(false)}
+                  disabled={restockSubmitting}
+                >
+                  <Text style={styles.restockCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.primaryButton, { flex: 1 }]}
+                  onPress={handleRestock}
+                  disabled={restockSubmitting}
+                >
+                  {restockSubmitting ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={20}
+                        color="#fff"
+                      />
+                      <Text style={styles.primaryButtonText}>Update Stock</Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
+            </Pressable>
           </Pressable>
         </Modal>
 
@@ -2156,6 +2283,53 @@ const styles = StyleSheet.create({
   empty: {
     color: colors.muted,
     marginTop: 40,
+  },
+  restockOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  restockCard: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E4E8F0",
+    padding: 16,
+  },
+  restockTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: colors.dark,
+  },
+  restockSubtitle: {
+    marginTop: 4,
+    fontSize: 14,
+    color: colors.muted,
+    fontWeight: "600",
+  },
+  restockCurrentQty: {
+    marginTop: 8,
+    marginBottom: 8,
+    fontSize: 13,
+    color: colors.dark,
+    fontWeight: "700",
+  },
+  restockActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 14,
+  },
+  restockCancelBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: "#F3F4F6",
+  },
+  restockCancelText: {
+    color: colors.muted,
+    fontWeight: "700",
   },
   modalContainer: {
     flex: 1,

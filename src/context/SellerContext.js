@@ -63,6 +63,7 @@ export const SellerProvider = ({ children }) => {
   const [settings, setSettings] = useState({});
   const appStateRef = useRef(AppState.currentState);
   const presenceChannelRef = useRef(null);
+  const authSyncInFlightRef = useRef(false);
 
   const updateLastSeen = useCallback(async (currentSellerId) => {
     if (!supabase || !currentSellerId) return;
@@ -239,6 +240,66 @@ export const SellerProvider = ({ children }) => {
       console.error("Error signing out:", error);
     }
   }, [sellerId, stopPresence]);
+
+  const deleteAccount = useCallback(
+    async (password) => {
+      if (!supabase || !sellerId) {
+        return { error: new Error("Not authenticated") };
+      }
+      if (!password) {
+        return { error: new Error("Password is required") };
+      }
+
+      try {
+        let email = profile?.email || "";
+        if (!email) {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+          email = user?.email || "";
+        }
+
+        if (!email) {
+          throw new Error("Unable to verify account email");
+        }
+
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (signInError) {
+          throw new Error("Incorrect password");
+        }
+
+        await stopPresence(sellerId);
+        await invokeEdgeFunction("delete_account", {
+          app: "seller",
+          seller_id: sellerId,
+        });
+        await AsyncStorage.removeItem(AUTH_USER_KEY);
+        await AsyncStorage.removeItem(AUTH_ROLE_KEY);
+        setSellerId(null);
+        setProfile(null);
+        setProducts([]);
+        setOrders([]);
+        setConversations([]);
+        setReviews([]);
+        setPayments([]);
+        setCategories(DEFAULT_CATEGORIES);
+        return { error: null };
+      } catch (error) {
+        console.error("Error deleting seller account:", error);
+        return {
+          error:
+            error instanceof Error
+              ? error
+              : new Error("Failed to delete account"),
+        };
+      }
+    },
+    [sellerId, stopPresence, profile?.email],
+  );
 
   // Fetch chats with user relationship
   const fetchChats = useCallback(async (sellerIdParam) => {
@@ -457,6 +518,70 @@ export const SellerProvider = ({ children }) => {
     }
   }, [getSellerId, fetchChats]);
 
+  const syncPaystackAndDatabase = useCallback(
+    async (sellerIdParam = null) => {
+      if (!supabase) return null;
+
+      const ensuredSellerId =
+        sellerIdParam || sellerId || (await getSellerId())?.id;
+      if (!ensuredSellerId) return null;
+
+      try {
+        const sellerRowRes = await supabase
+          .from("express_sellers")
+          .select("id,payment_platform,payment_account,account_verified")
+          .eq("id", ensuredSellerId)
+          .maybeSingle();
+
+        if (sellerRowRes.error) {
+          throw sellerRowRes.error;
+        }
+
+        const sellerRow = sellerRowRes.data;
+        if (!sellerRow) return null;
+
+        const isPaystack =
+          String(sellerRow?.payment_platform || "").toLowerCase() ===
+          "paystack";
+        const subaccountCode = String(sellerRow?.payment_account || "").trim();
+
+        if (!isPaystack || !subaccountCode) {
+          setNeedsSubaccount(true);
+          return {
+            skipped: true,
+            reason: "missing_paystack_or_subaccount",
+          };
+        }
+
+        const syncResp = await invokeEdgeFunction("create_subaccount", {
+          action: "sync_subaccount_status",
+          seller_id: ensuredSellerId,
+          subaccount_code: subaccountCode,
+        });
+
+        const { data: refreshed, error: refreshErr } = await supabase
+          .from("express_sellers")
+          .select("*")
+          .eq("id", ensuredSellerId)
+          .single();
+
+        if (!refreshErr && refreshed) {
+          setProfile(refreshed);
+          const hasPaystack =
+            refreshed?.payment_platform === "paystack" &&
+            refreshed?.payment_account;
+          setNeedsSubaccount(!hasPaystack);
+        }
+
+        return syncResp;
+      } catch (syncErr) {
+        console.warn("Paystack/DB sync failed:", syncErr?.message || syncErr);
+        return null;
+      }
+    },
+    [sellerId, getSellerId],
+  );
+
   const createPaystackSubaccount = useCallback(
     async (opts = {}) => {
       if (!supabase) throw new Error("Supabase not configured");
@@ -645,6 +770,47 @@ export const SellerProvider = ({ children }) => {
   useEffect(() => {
     fetchAll();
   }, [fetchAll]);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    const runAuthSync = async (session) => {
+      if (!session?.user?.id || authSyncInFlightRef.current) return;
+
+      authSyncInFlightRef.current = true;
+      try {
+        const seller = await getSellerId();
+        if (!seller?.id) return;
+
+        await syncPaystackAndDatabase(seller.id);
+      } finally {
+        authSyncInFlightRef.current = false;
+      }
+    };
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (
+          event === "INITIAL_SESSION" ||
+          event === "SIGNED_IN" ||
+          event === "TOKEN_REFRESHED" ||
+          event === "USER_UPDATED"
+        ) {
+          await runAuthSync(session);
+        }
+      },
+    );
+
+    // Also run once on mount in case auth state listener fires before provider is ready.
+    supabase.auth
+      .getSession()
+      .then(({ data }) => runAuthSync(data?.session || null))
+      .catch(() => {});
+
+    return () => {
+      authListener?.subscription?.unsubscribe?.();
+    };
+  }, [getSellerId, syncPaystackAndDatabase]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -1088,8 +1254,10 @@ export const SellerProvider = ({ children }) => {
     replyToReview,
     reviews,
     logout,
+    deleteAccount,
     needsSubaccount,
     createPaystackSubaccount,
+    syncPaystackAndDatabase,
     payments,
   };
 

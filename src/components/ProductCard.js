@@ -11,6 +11,9 @@ export const ProductCard = ({
   theme: themeProp,
 }) => {
   const theme = themeProp || getTheme(colors.primary);
+  const hasInventoryValue = product?.quantity != null || product?.stock != null;
+  const availableStock = Number(product?.quantity ?? product?.stock ?? 0);
+  const isOutOfStock = hasInventoryValue && availableStock <= 0;
   // Handle flash sale data - could be passed directly or from product.flash_sale array
   const activeFlashSale =
     flashSale ||
@@ -30,7 +33,11 @@ export const ProductCard = ({
 
   return (
     <Pressable
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+      style={({ pressed }) => [
+        styles.card,
+        isOutOfStock && styles.outOfStockCard,
+        pressed && styles.cardPressed,
+      ]}
       onPress={() => onPress?.(product)}
     >
       <View style={styles.imageContainer}>
@@ -49,6 +56,11 @@ export const ProductCard = ({
             </Text>
           </View>
         ) : null}
+        {isOutOfStock && (
+          <View style={styles.outOfStockOverlay}>
+            <Text style={styles.outOfStockOverlayText}>Out of Stock</Text>
+          </View>
+        )}
       </View>
       <View style={styles.content}>
         <View style={styles.header}>
@@ -75,7 +87,13 @@ export const ProductCard = ({
           </View>
           <View style={styles.metaRow}>
             <Ionicons name="cube-outline" size={12} color={colors.muted} />
-            <Text style={styles.metaText}>Stock: {product.quantity || 0}</Text>
+            <Text style={[styles.metaText, isOutOfStock && styles.stockDanger]}>
+              {isOutOfStock
+                ? "Out of stock"
+                : hasInventoryValue
+                  ? `Stock: ${availableStock}`
+                  : "Stock: --"}
+            </Text>
           </View>
         </View>
       </View>
@@ -101,8 +119,28 @@ const styles = StyleSheet.create({
     opacity: 0.9,
     transform: [{ scale: 0.99 }],
   },
+  outOfStockCard: {
+    opacity: 0.72,
+  },
   imageContainer: {
     position: "relative",
+  },
+  outOfStockOverlay: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    backgroundColor: "rgba(31,41,55,0.9)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    zIndex: 10,
+  },
+  outOfStockOverlayText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
   },
   image: {
     width: "100%",
@@ -133,6 +171,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.muted,
     fontWeight: "500",
+  },
+  stockDanger: {
+    color: colors.accent,
+    fontWeight: "700",
   },
   details: {
     flexDirection: "row",

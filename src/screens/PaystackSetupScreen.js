@@ -25,7 +25,7 @@ export const PaystackSetupScreen = ({ navigation }) => {
 
   const [step, setStep] = useState(1);
   const [type, setType] = useState("bank");
-  const [currency, setCurrency] = useState("NGN");
+  const [currency, setCurrency] = useState("GHS");
   const [banks, setBanks] = useState([]);
   const [loadingBanks, setLoadingBanks] = useState(false);
   const [bankCode, setBankCode] = useState("");

@@ -7,11 +7,13 @@ import {
   Dimensions,
   Image,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "../theme/colors";
 
 const { width, height } = Dimensions.get("window");
 
 export const LoadingAnimation = () => {
+  const insets = useSafeAreaInsets();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const logoPulse = useRef(new Animated.Value(1)).current;
@@ -216,6 +218,14 @@ export const LoadingAnimation = () => {
         {/* Loading Text */}
         <Text style={styles.loadingText}>Loading your dashboard...</Text>
       </Animated.View>
+
+      <View style={[styles.bottomBranding, { bottom: 24 + insets.bottom }]}>
+        <Image
+          source={require("../../assets/olives.jpg")}
+          style={styles.bottomImage}
+        />
+        <Text style={styles.bottomText}>with olives import</Text>
+      </View>
     </View>
   );
 };
@@ -299,5 +309,22 @@ const styles = StyleSheet.create({
     color: colors.muted,
     textAlign: "center",
     fontWeight: "500",
+  },
+  bottomBranding: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bottomImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    marginBottom: 8,
+  },
+  bottomText: {
+    fontSize: 12,
+    color: colors.muted,
+    fontWeight: "600",
+    letterSpacing: 0.5,
   },
 });
