@@ -18,7 +18,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
-import { File } from "expo-file-system";
 import { Ionicons } from "@expo/vector-icons";
 import { useSeller } from "../context/SellerContext";
 import { useToast } from "../context/ToastContext";
@@ -47,6 +46,7 @@ const CatalogScreen = () => {
     products,
     categories,
     profile,
+    sellerId,
     settings,
     createProduct,
     updateProduct,
@@ -246,27 +246,7 @@ const CatalogScreen = () => {
 
   const uploadImage = async (uri) => {
     try {
-      const readImageBinary = async (imageUri) => {
-        if (Platform.OS === "web") {
-          const response = await fetch(imageUri);
-          const arrayBuffer = await response.arrayBuffer();
-
-          return {
-            fileData: arrayBuffer,
-            contentType: response.headers.get("content-type") || null,
-          };
-        }
-        const arrayBuffer = await new File(imageUri).arrayBuffer();
-
-        return {
-          fileData: arrayBuffer,
-          contentType: null,
-        };
-      };
-
-      const { fileData, contentType: detectedContentType } =
-        await readImageBinary(uri);
-
+      console.log("uploadImage start:", { uri, platform: Platform.OS });
       const getImageExtension = (imageUri) => {
         const cleanUri = imageUri?.split("?")[0] || "";
         const fileNameSegment = cleanUri.split("/").pop() || "";
@@ -278,32 +258,65 @@ const CatalogScreen = () => {
         return ext === "jpeg" ? "jpg" : ext;
       };
 
-      // Create a unique filename
+      // Create a unique filename and object path under the seller folder
       const ext = getImageExtension(uri);
       const fileName = `product-${Date.now()}-${Math.random()
         .toString(36)
         .substring(7)}.${ext}`;
+      const sellerFolder = profile?.id || sellerId || "unknown";
+      const objectPath = `products/${sellerFolder}/${fileName}`;
+
+      // Try to detect content type
+      let detectedContentType = null;
+      try {
+        const resp = await fetch(uri);
+        detectedContentType = resp.headers?.get?.("content-type") || null;
+      } catch (e) {
+        // ignore
+      }
+
       const contentType =
         detectedContentType || `image/${ext === "jpg" ? "jpeg" : ext}`;
 
-      // Upload to Supabase Storage
-      const { data, error } = await supabase.storage
-        .from("express-products")
-        .upload(fileName, fileData, {
-          contentType,
-          cacheControl: "3600",
-          upsert: false,
+      // Upload using Blob on web and FormData on native
+      let uploadRes;
+      if (Platform.OS === "web") {
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        uploadRes = await supabase.storage
+          .from("express-products")
+          .upload(objectPath, blob, {
+            contentType,
+            cacheControl: "3600",
+            upsert: false,
+          });
+      } else {
+        const formDataUpload = new FormData();
+        formDataUpload.append("file", {
+          uri: uri,
+          type: contentType,
+          name: fileName,
         });
 
-      if (error) {
-        console.error("Supabase upload error:", error);
-        throw error;
+        uploadRes = await supabase.storage
+          .from("express-products")
+          .upload(objectPath, formDataUpload, {
+            contentType,
+            cacheControl: "3600",
+            upsert: false,
+          });
+      }
+
+      console.log("supabase.storage.upload result:", uploadRes);
+      if (uploadRes.error) {
+        console.error("Supabase upload error:", uploadRes.error);
+        throw uploadRes.error;
       }
 
       // Get the public URL
       const { data: urlData } = supabase.storage
         .from("express-products")
-        .getPublicUrl(fileName);
+        .getPublicUrl(objectPath);
 
       return urlData.publicUrl;
     } catch (error) {

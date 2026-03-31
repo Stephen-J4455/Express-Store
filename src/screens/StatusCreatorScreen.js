@@ -17,7 +17,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
-import { File } from "expo-file-system";
 import { supabase } from "../../supabase";
 import { colors, getTheme } from "../theme/colors";
 import { useSeller } from "../context/SellerContext";
@@ -140,40 +139,49 @@ export const StatusCreatorScreen = ({ navigation }) => {
   };
 
   const uploadStatusImage = async (uri) => {
-    const readImageBinary = async (imageUri) => {
-      if (Platform.OS === "web") {
-        const response = await fetch(imageUri);
-        const arrayBuffer = await response.arrayBuffer();
-
-        return {
-          fileData: arrayBuffer,
-          contentType: response.headers.get("content-type") || null,
-        };
-      }
-      const arrayBuffer = await new File(imageUri).arrayBuffer();
-
-      return {
-        fileData: arrayBuffer,
-        contentType: null,
-      };
-    };
-
-    const { fileData, contentType: detectedContentType } =
-      await readImageBinary(uri);
+    // Build filename and detect content type
     const ext = getImageExtension(uri);
     const fileName = `${sellerId}/${Date.now()}.${ext}`;
+
+    let detectedContentType = null;
+    try {
+      const resp = await fetch(uri);
+      detectedContentType = resp.headers?.get?.("content-type") || null;
+    } catch (e) {
+      // ignore
+    }
     const contentType =
       detectedContentType || `image/${ext === "jpg" ? "jpeg" : ext}`;
 
-    const { error } = await supabase.storage
-      .from("seller-statuses")
-      .upload(fileName, fileData, {
-        contentType,
-        cacheControl: "3600",
-        upsert: false,
+    // Use Blob on web, FormData on native
+    if (Platform.OS === "web") {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const { error } = await supabase.storage
+        .from("seller-statuses")
+        .upload(fileName, blob, {
+          contentType,
+          cacheControl: "3600",
+          upsert: false,
+        });
+      if (error) throw error;
+    } else {
+      const formDataUpload = new FormData();
+      formDataUpload.append("file", {
+        uri: uri,
+        type: contentType,
+        name: fileName.split("/").pop(),
       });
+      const { error } = await supabase.storage
+        .from("seller-statuses")
+        .upload(fileName, formDataUpload, {
+          contentType,
+          cacheControl: "3600",
+          upsert: false,
+        });
+      if (error) throw error;
+    }
 
-    if (error) throw error;
     return fileName;
   };
 

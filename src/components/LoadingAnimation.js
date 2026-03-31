@@ -262,16 +262,10 @@ const styles = StyleSheet.create({
   iconContainer: {
     width: 160,
     height: 160,
-    borderRadius: 80,
-    backgroundColor: colors.surface,
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 24,
-    shadowColor: colors.primary,
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 16,
-    elevation: 8,
+    backgroundColor: "transparent",
   },
   logoImage: {
     width: 104,

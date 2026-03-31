@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,11 +12,11 @@ import {
   FlatList,
   RefreshControl,
   Modal,
+  Linking,
   Platform,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
-import { File } from "expo-file-system";
 import { PieChart } from "react-native-gifted-charts";
 import { Ionicons } from "@expo/vector-icons";
 import { useSeller } from "../context/SellerContext";
@@ -39,6 +40,8 @@ const BADGE_CONFIG = {
 };
 
 const THEME_OPTIONS = Object.values(THEMES).map((t) => t.primary);
+// Supabase storage bucket for seller profile images
+const PROFILE_BUCKET = "profile";
 
 export const ProfileScreen = () => {
   const {
@@ -52,6 +55,7 @@ export const ProfileScreen = () => {
     sellerId,
     needsSubaccount,
     createPaystackSubaccount,
+    deleteAccount,
   } = useSeller();
   const toast = useToast();
   const navigation = useNavigation();
@@ -119,6 +123,65 @@ export const ProfileScreen = () => {
   const [securePassword, setSecurePassword] = useState("");
   const [secureSubmitting, setSecureSubmitting] = useState(false);
   const [secureAction, setSecureAction] = useState(null);
+  const [privacyVisible, setPrivacyVisible] = useState(false);
+
+  const PRIVACY_POLICY_TEXT = `Privacy Policy
+
+Last updated: March 1, 2026
+
+Your privacy is important to us. This Privacy Policy explains how ExpressMart ("we", "us", or "our") collects, uses, and protects your personal information when you use our mobile application and services.
+
+1. Information We Collect
+- Account information: name, email address, phone number and delivery addresses you provide during registration or checkout.
+- Order data: products purchased, order amounts, shipping details and payment references.
+- Device information: device model, operating system version, unique device identifiers and push-notification tokens used to deliver order updates.
+- Usage data: pages viewed, search queries, and interactions within the app, collected to improve your experience.
+
+We do not collect or store your payment card details. All payment processing is handled securely by our third-party payment provider (Paystack).
+
+2. How We Use Your Information
+- Process and fulfill your orders
+- Send order status updates and delivery notifications
+- Provide customer support and respond to your inquiries
+- Personalize your shopping experience and show relevant product recommendations
+- Communicate promotional offers (only with your consent)
+- Detect and prevent fraud or unauthorized activity
+- Improve and maintain the performance and security of our services
+
+3. Information Sharing
+- With sellers on our platform — we share your name, delivery address and order details so that sellers can fulfill your orders.
+- With payment processors — we share transaction references with Paystack for payment verification.
+- With delivery partners — we share delivery addresses and order details to enable shipment.
+- When required by law — we may disclose information in response to valid legal requests from authorities.
+
+We never sell your personal information to third parties for marketing purposes.
+
+4. Data Security
+- We implement industry-standard security measures to protect your personal information, including encrypted data transmission (TLS/SSL), secure database storage, access controls and regular security audits.
+
+5. Your Rights
+- Access and review the personal data we hold about you
+- Update or correct inaccurate information via your Profile settings
+- Request deletion of your account and associated data
+- Opt out of promotional communications at any time
+- Withdraw consent for data processing where consent is the legal basis
+
+To exercise any of these rights, please contact us through the Help & Support section of the app or email expressmart233@gmail.com.
+
+6. Data Retention
+- We retain your personal information for as long as your account is active or as needed to provide you with our services. When you delete your account, we will remove your personal data within 30 days, except where retention is required by law.
+
+7. Children's Privacy
+- ExpressMart is not intended for use by individuals under the age of 13. We do not knowingly collect personal information from children.
+
+8. Changes to This Policy
+- We may update this Privacy Policy from time to time. When we make changes, we will update the Last Updated date and notify you for significant changes.
+
+9. Contact Us
+- In-app: Account → Help & Support
+- Email: expressmart233@gmail.com
+
+Company: ExpressMart`;
   // Paystack-supported banks (fetched from edge function). Start with a small fallback list.
   const DEFAULT_PAYSTACK_BANKS = [
     { code: "044", name: "Access Bank" },
@@ -168,6 +231,115 @@ export const ProfileScreen = () => {
     const tab = route.params?.initialTab;
     if (tab) setActiveTab(tab);
   }, [route.params?.initialTab]);
+
+  // Quick actions for seller profile (rendered in main tab)
+  const quickActions = [
+    {
+      icon: "cube",
+      label: "Orders",
+      action: () => navigation.navigate("Orders"),
+      color: "#3B82F6",
+      bg: "#EFF6FF",
+    },
+    {
+      icon: "bag-check",
+      label: "Catalog",
+      action: () => navigation.navigate("Catalog"),
+      color: "#10B981",
+      bg: "#F0FDF4",
+    },
+    {
+      icon: "card",
+      label: "Payouts",
+      action: () => navigation.navigate("PaystackSetup"),
+      color: "#F59E0B",
+      bg: "#FFFBEB",
+    },
+    {
+      icon: "people",
+      label: "Followers",
+      action: () => setActiveTab("followers"),
+      color: "#A855F7",
+      bg: "#FAF5FF",
+    },
+  ];
+
+  const startEditing = () => {
+    setEditName(profile?.name || "");
+    setEditEmail(profile?.email || "");
+    setEditPhone(profile?.phone || "");
+    setEditLocation(profile?.location || "");
+    setEditFulfillmentSpeed(profile?.fulfillment_speed || "");
+    setEditWeeklyTarget(profile?.weekly_target?.toString() || "");
+    setEditAvatar(profile?.avatar || "");
+    setEditFacebook(profile?.social_facebook || "");
+    setEditInstagram(profile?.social_instagram || "");
+    setEditTwitter(profile?.social_twitter || "");
+    setEditWhatsapp(profile?.social_whatsapp || "");
+    setEditWebsite(profile?.social_website || "");
+    setEditing(true);
+  };
+
+  const openSocialLink = async (cfg) => {
+    if (!cfg?.value) return;
+    let url = String(cfg.value).trim();
+    try {
+      if (cfg.type === "whatsapp") {
+        const digits = url.replace(/\D/g, "");
+        if (digits.length) url = `https://wa.me/${digits}`;
+      } else if (cfg.type === "website") {
+        if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+      } else {
+        // facebook/instagram/twitter - treat as handle when no scheme
+        if (!/^https?:\/\//i.test(url)) {
+          const handle = url.replace(/^@/, "");
+          const domain = cfg.domain || cfg.type;
+          url = `https://${domain}/${handle}`;
+        }
+      }
+
+      const can = await Linking.canOpenURL(url);
+      if (can) await Linking.openURL(url);
+      else toast.error("Cannot open link");
+    } catch (err) {
+      toast.error("Failed to open link");
+    }
+  };
+
+  const menuSections = [
+    {
+      title: "Account Settings",
+      items: [
+        { icon: "person-outline", label: "Edit Profile", action: startEditing },
+        {
+          icon: "notifications-outline",
+          label: "Notifications",
+          action: () => {
+            try {
+              Linking.openSettings();
+            } catch (e) {
+              navigation.navigate("Profile");
+            }
+          },
+        },
+      ],
+    },
+    {
+      title: "Support",
+      items: [
+        {
+          icon: "chatbubble-ellipses-outline",
+          label: "Support",
+          action: () => setActiveTab("support"),
+        },
+        {
+          icon: "document-text-outline",
+          label: "Terms & Policies",
+          action: () => setPrivacyVisible(true),
+        },
+      ],
+    },
+  ];
 
   // Fetch followers (kept minimal)
   const fetchFollowers = async () => {
@@ -443,6 +615,24 @@ export const ProfileScreen = () => {
 
     setSecureSubmitting(true);
     try {
+      // Handle account deletion separately to avoid double re-auth
+      if (secureAction === "delete") {
+        try {
+          const res = await deleteAccount(securePassword);
+          setSecurePromptVisible(false);
+          setSecurePassword("");
+          setSecureAction(null);
+          if (res?.error) throw res.error;
+          toast.success("Account deleted");
+          try {
+            await supabase.auth.signOut();
+          } catch (e) {}
+          return;
+        } catch (err) {
+          toast.error(err?.message || "Account deletion failed");
+          return;
+        }
+      }
       let email = profile?.email || "";
       if (!email) {
         const {
@@ -540,26 +730,7 @@ export const ProfileScreen = () => {
 
   const uploadImage = async (uri) => {
     try {
-      const readImageBinary = async (imageUri) => {
-        if (Platform.OS === "web") {
-          const response = await fetch(imageUri);
-          const arrayBuffer = await response.arrayBuffer();
-
-          return {
-            fileData: arrayBuffer,
-            contentType: response.headers.get("content-type") || null,
-          };
-        }
-        const arrayBuffer = await new File(imageUri).arrayBuffer();
-
-        return {
-          fileData: arrayBuffer,
-          contentType: null,
-        };
-      };
-
-      const { fileData, contentType: detectedContentType } =
-        await readImageBinary(uri);
+      console.log("uploadImage start:", { uri, platform: Platform.OS });
 
       const getImageExtension = (imageUri) => {
         const cleanUri = imageUri?.split("?")[0] || "";
@@ -573,20 +744,85 @@ export const ProfileScreen = () => {
       };
 
       const ext = getImageExtension(uri);
-      const fileName = `avatar-${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
+      const fileName = `avatar.${ext}`;
+      const objectPath = sellerId ? `${sellerId}/${fileName}` : fileName;
+
+      // Try to detect content type
+      let detectedContentType = null;
+      try {
+        const resp = await fetch(uri);
+        detectedContentType = resp.headers?.get?.("content-type") || null;
+      } catch (e) {
+        // ignore
+      }
+
       const contentType =
         detectedContentType || `image/${ext === "jpg" ? "jpeg" : ext}`;
-      const { data, error } = await supabase.storage
-        .from("express-products")
-        .upload(fileName, fileData, {
-          contentType,
-          cacheControl: "3600",
-          upsert: false,
+
+      // Ensure we replace any previous avatar files for this seller by cleaning the folder first
+      if (sellerId) {
+        try {
+          const { data: existing, error: listErr } = await supabase.storage
+            .from(PROFILE_BUCKET)
+            .list(sellerId);
+          if (listErr) {
+            console.warn("Failed to list existing profile objects:", listErr);
+          } else if (existing && existing.length > 0) {
+            const pathsToDelete = (existing || []).map(
+              (e) => `${sellerId}/${e.name}`,
+            );
+            const { error: removeErr } = await supabase.storage
+              .from(PROFILE_BUCKET)
+              .remove(pathsToDelete);
+            if (removeErr) {
+              console.warn(
+                "Failed to remove existing avatar files:",
+                removeErr,
+              );
+            } else {
+              console.log("Removed existing avatar files:", pathsToDelete);
+            }
+          }
+        } catch (e) {
+          console.warn("Error cleaning existing profile images:", e);
+        }
+      }
+
+      // Use Blob on web, FormData on native (React Native) to ensure uploads work across platforms
+      let uploadRes;
+      if (Platform.OS === "web") {
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        uploadRes = await supabase.storage
+          .from(PROFILE_BUCKET)
+          .upload(objectPath, blob, {
+            contentType,
+            cacheControl: "3600",
+            upsert: true,
+          });
+      } else {
+        const formDataUpload = new FormData();
+        formDataUpload.append("file", {
+          uri: uri,
+          type: contentType,
+          name: fileName,
         });
-      if (error) throw error;
+
+        uploadRes = await supabase.storage
+          .from(PROFILE_BUCKET)
+          .upload(objectPath, formDataUpload, {
+            contentType,
+            cacheControl: "3600",
+            upsert: true,
+          });
+      }
+
+      console.log("supabase.storage.upload result:", uploadRes);
+      if (uploadRes.error) throw uploadRes.error;
+
       const { data: urlData } = supabase.storage
-        .from("express-products")
-        .getPublicUrl(fileName);
+        .from(PROFILE_BUCKET)
+        .getPublicUrl(objectPath);
       return urlData.publicUrl;
     } catch (error) {
       throw new Error(`Failed to upload image: ${error.message}`);
@@ -631,23 +867,6 @@ export const ProfileScreen = () => {
       setSaving(false);
     }
   };
-
-  const startEditing = () => {
-    setEditName(profile?.name || "");
-    setEditEmail(profile?.email || "");
-    setEditPhone(profile?.phone || "");
-    setEditLocation(profile?.location || "");
-    setEditFulfillmentSpeed(profile?.fulfillment_speed || "");
-    setEditWeeklyTarget(profile?.weekly_target?.toString() || "");
-    setEditAvatar(profile?.avatar || "");
-    setEditFacebook(profile?.social_facebook || "");
-    setEditInstagram(profile?.social_instagram || "");
-    setEditTwitter(profile?.social_twitter || "");
-    setEditWhatsapp(profile?.social_whatsapp || "");
-    setEditWebsite(profile?.social_website || "");
-    setEditing(true);
-  };
-
   const submitTicket = async () => {
     if (!subject || !message) return;
     setSubmitting(true);
@@ -756,40 +975,47 @@ export const ProfileScreen = () => {
         {activeTab === "feedback" ? (
           <FeedbackScreen embedded />
         ) : (
-          <ScrollView contentContainerStyle={{ paddingBottom: 140 }}>
-            {/* Main Tab */}
+          <ScrollView
+            contentContainerStyle={{
+              paddingHorizontal: 16,
+              paddingTop: 12,
+              paddingBottom: 40,
+            }}
+          >
             {activeTab === "main" && (
-              <View style={styles.tabContent}>
-                {/* Hero */}
-                <View style={styles.heroCard}>
+              <>
+                {/* Profile hero */}
+                <View style={[styles.heroCard]}>
                   <LinearGradient
-                    colors={[theme.gradientStart, theme.gradientEnd]}
+                    colors={[theme.primary, theme.primary + "cc"]}
                     style={styles.heroGradient}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
                   >
                     <View style={styles.heroRow}>
                       <View style={styles.heroLeft}>
-                        {profile?.avatar ? (
-                          <Image
-                            source={{ uri: profile.avatar }}
-                            style={styles.heroAvatar}
-                          />
-                        ) : (
-                          <View
-                            style={[
-                              styles.heroAvatar,
-                              styles.avatarPlaceholder,
-                            ]}
-                          >
-                            <Ionicons name="person" size={44} color="#fff" />
-                          </View>
-                        )}
                         <Pressable
                           onPress={startEditing}
-                          style={styles.heroEditButton}
+                          style={styles.heroAvatar}
                         >
-                          <Ionicons name="pencil" size={16} color="#fff" />
+                          {profile?.avatar ? (
+                            <Image
+                              source={{ uri: profile.avatar }}
+                              style={styles.heroAvatar}
+                            />
+                          ) : (
+                            <View style={styles.heroAvatar}>
+                              <Ionicons
+                                name="person"
+                                size={40}
+                                color={colors.muted}
+                              />
+                            </View>
+                          )}
+                          <Pressable
+                            style={styles.heroEditButton}
+                            onPress={startEditing}
+                          >
+                            <Ionicons name="pencil" size={14} color="#fff" />
+                          </Pressable>
                         </Pressable>
                       </View>
                       <View style={styles.heroRight}>
@@ -797,189 +1023,361 @@ export const ProfileScreen = () => {
                           {profile?.name || "Seller"}
                         </Text>
                         <Text style={styles.heroSubtitle}>
-                          {profile?.location || "—"}
+                          {profile?.location || ""}
                         </Text>
-                        {/* seller badges moved to its own card below */}
-                      </View>
-                    </View>
+                        {/* Social links row */}
+                        {(() => {
+                          const socialConfigs = [
+                            {
+                              key: "social_facebook",
+                              icon: "logo-facebook",
+                              type: "facebook",
+                              domain: "facebook.com",
+                            },
+                            {
+                              key: "social_instagram",
+                              icon: "logo-instagram",
+                              type: "instagram",
+                              domain: "instagram.com",
+                            },
+                            {
+                              key: "social_twitter",
+                              icon: "logo-twitter",
+                              type: "twitter",
+                              domain: "twitter.com",
+                            },
+                            {
+                              key: "social_whatsapp",
+                              icon: "logo-whatsapp",
+                              type: "whatsapp",
+                            },
+                            {
+                              key: "social_website",
+                              icon: "globe-outline",
+                              type: "website",
+                            },
+                          ];
+                          const links = socialConfigs
+                            .map((c) => ({ ...c, value: profile?.[c.key] }))
+                            .filter((s) => s.value && String(s.value).trim());
 
-                    <View style={styles.heroMetricsRow}>
-                      <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Rating</Text>
-                        <Text style={styles.statValue}>
-                          {profile?.rating ?? computedRating ?? "--"}
-                        </Text>
-                      </View>
-                      <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Products</Text>
-                        <Text style={styles.statValue}>
-                          {products.filter((p) => p.status === "active").length}
-                        </Text>
-                      </View>
-                      <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Followers</Text>
-                        <Text style={styles.statValue}>{followers.length}</Text>
-                      </View>
-                    </View>
-                    {/* Prompt to create Paystack subaccount if missing */}
-                    {needsSubaccount ? (
-                      <View
-                        style={[
-                          styles.card,
-                          {
-                            marginTop: 12,
-                            padding: 12,
-                            backgroundColor: "#FFF8ED",
-                            borderColor: "#FDE3BF",
-                          },
-                        ]}
-                      >
-                        <Text style={{ fontWeight: "600", marginBottom: 8 }}>
-                          Receive payments with Paystack
-                        </Text>
-                        <Text style={{ color: "#6B7280", marginBottom: 8 }}>
-                          We didn't find a Paystack subaccount for your store.
-                          Create one now to accept payments.
-                        </Text>
-                        <View style={{ flexDirection: "row" }}>
-                          <Pressable
-                            onPress={() => navigation.navigate("PaystackSetup")}
-                            style={[
-                              styles.button,
-                              {
-                                backgroundColor: theme.primary,
-                                paddingHorizontal: 16,
-                              },
-                            ]}
-                          >
-                            <Text style={{ color: "#fff", fontWeight: "600" }}>
-                              Create Paystack account
+                          if (links.length === 0) return null;
+                          return (
+                            <View style={styles.heroSocialRow}>
+                              {links.map((s) => (
+                                <Pressable
+                                  key={s.key}
+                                  style={styles.socialIcon}
+                                  onPress={() => openSocialLink(s)}
+                                >
+                                  <Ionicons
+                                    name={s.icon}
+                                    size={16}
+                                    color="#fff"
+                                  />
+                                </Pressable>
+                              ))}
+                            </View>
+                          );
+                        })()}
+                        <View style={styles.heroMetricsRow}>
+                          <View style={styles.statBox}>
+                            <Text style={styles.statLabel}>Orders</Text>
+                            <Text style={styles.statValue}>
+                              {orders?.length || 0}
                             </Text>
-                          </Pressable>
+                          </View>
+                          <View style={styles.statBox}>
+                            <Text style={styles.statLabel}>Followers</Text>
+                            <Text style={styles.statValue}>
+                              {followers.length}
+                            </Text>
+                          </View>
+                          <View style={styles.statBox}>
+                            <Text style={styles.statLabel}>Products</Text>
+                            <Text style={styles.statValue}>
+                              {products?.filter((p) => p.status === "active")
+                                .length || 0}
+                            </Text>
+                          </View>
                         </View>
                       </View>
-                    ) : (
-                      <View
-                        style={[
-                          styles.card,
-                          {
-                            marginTop: 12,
-                            padding: 0,
-                            overflow: "hidden",
-                            backgroundColor: "transparent",
-                            borderColor: "transparent",
-                          },
-                        ]}
-                      >
-                        <View style={isWide && styles.visaCardWide}>
-                          <LinearGradient
-                            colors={["#1a1a2e", "#16213e", "#0f3460"]}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                            style={styles.visaCard}
-                          >
-                            {/* Top: chip + platform */}
-                            <View style={styles.visaTopRow}>
-                              <View style={styles.visaChip}>
-                                <View style={styles.visaChipLine} />
-                                <View style={styles.visaChipGrid} />
-                              </View>
-                              <View style={styles.visaActivePill}>
-                                <View
-                                  style={[
-                                    styles.visaActiveDot,
-                                    !profile?.account_verified &&
-                                      styles.visaInactiveDot,
-                                  ]}
-                                />
-                                <Text style={styles.visaActiveText}>
-                                  {profile?.account_verified
-                                    ? "Verified"
-                                    : "Unverified"}
-                                </Text>
-                              </View>
-                            </View>
-
-                            {/* Card number */}
-                            <View style={styles.visaNumberRow}>
-                              <Text style={styles.visaCardNumber}>
-                                {maskedPaymentAccount}
-                              </Text>
-                              <Pressable
-                                onPress={() => {
-                                  if (showFullPaymentAccount) {
-                                    setShowFullPaymentAccount(false);
-                                  } else {
-                                    requestSecureAction("reveal");
-                                  }
-                                }}
-                                style={styles.visaRevealBtn}
-                              >
-                                <Ionicons
-                                  name={
-                                    showFullPaymentAccount
-                                      ? "eye-off-outline"
-                                      : "eye-outline"
-                                  }
-                                  size={16}
-                                  color="#fff"
-                                />
-                              </Pressable>
-                            </View>
-
-                            {/* Bottom: name + VISA logo */}
-                            <View style={styles.visaBottomRow}>
-                              <View>
-                                <Text style={styles.visaLabel}>
-                                  Account Holder
-                                </Text>
-                                <Text style={styles.visaValue}>
-                                  {profile?.name || "Business Account"}
-                                </Text>
-                              </View>
-                              <View style={{ alignItems: "flex-end" }}>
-                                <Text style={styles.visaLogo}>
-                                  {(profile?.payment_platform || "Paystack")
-                                    .toUpperCase()
-                                    .slice(0, 8)}
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.visaSubValue,
-                                    styles.visaSubValueRight,
-                                  ]}
-                                >
-                                  {profile?.account_code || "Not set"}
-                                </Text>
-                              </View>
-                            </View>
-                          </LinearGradient>
-
-                          <Pressable
-                            onPress={() => requestSecureAction("edit")}
+                    </View>
+                  </LinearGradient>
+                </View>
+                {/* Seller Badges */}
+                <View style={[styles.card, { marginTop: 12 }]}>
+                  <Text style={styles.section}>Seller Badges</Text>
+                  {!profile?.badges || profile.badges.length === 0 ? (
+                    <Text style={styles.subtitle}>No badges yet</Text>
+                  ) : (
+                    <View style={styles.badgesGrid}>
+                      {profile.badges.map((badgeId) => {
+                        const badge = BADGE_CONFIG[badgeId];
+                        if (!badge) return null;
+                        return (
+                          <View
+                            key={badgeId}
                             style={[
-                              styles.visaEditButton,
-                              { borderColor: "#E2E8F0" },
+                              styles.badgeItemLarge,
+                              { backgroundColor: badge.color + "20" },
                             ]}
                           >
                             <Ionicons
-                              name="pencil-outline"
-                              size={14}
-                              color={colors.dark}
+                              name={badge.icon}
+                              size={16}
+                              color={badge.color}
                             />
                             <Text
                               style={[
-                                styles.visaEditText,
-                                { color: colors.dark },
+                                styles.badgeItemText,
+                                { color: badge.color },
                               ]}
                             >
-                              Edit Payment Info
+                              {badge.label}
                             </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
+
+                {/* Paystack / Payout card */}
+                {needsSubaccount ? (
+                  <View
+                    style={[
+                      styles.card,
+                      {
+                        marginTop: 12,
+                        padding: 12,
+                        backgroundColor: "#FFF8ED",
+                        borderColor: "#FDE3BF",
+                      },
+                    ]}
+                  >
+                    <Text style={{ fontWeight: "600", marginBottom: 8 }}>
+                      Receive payments with Paystack
+                    </Text>
+                    <Text style={{ color: "#6B7280", marginBottom: 8 }}>
+                      We didn't find a Paystack subaccount for your store.
+                      Create one now to accept payments.
+                    </Text>
+                    <View style={{ flexDirection: "row" }}>
+                      <Pressable
+                        onPress={() => navigation.navigate("PaystackSetup")}
+                        style={[
+                          styles.button,
+                          {
+                            backgroundColor: theme.primary,
+                            paddingHorizontal: 16,
+                          },
+                        ]}
+                      >
+                        <Text style={{ color: "#fff", fontWeight: "600" }}>
+                          Create Paystack account
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <View
+                    style={[
+                      styles.card,
+                      {
+                        marginTop: 12,
+                        padding: 0,
+                        overflow: "hidden",
+                        backgroundColor: "transparent",
+                        borderColor: "transparent",
+                      },
+                    ]}
+                  >
+                    <View style={isWide && styles.visaCardWide}>
+                      <LinearGradient
+                        colors={["#1a1a2e", "#16213e", "#0f3460"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.visaCard}
+                      >
+                        {/* Top: chip + platform */}
+                        <View style={styles.visaTopRow}>
+                          <View style={styles.visaChip}>
+                            <View style={styles.visaChipLine} />
+                            <View style={styles.visaChipGrid} />
+                          </View>
+                          <View style={styles.visaActivePill}>
+                            <View
+                              style={[
+                                styles.visaActiveDot,
+                                !profile?.account_verified &&
+                                  styles.visaInactiveDot,
+                              ]}
+                            />
+                            <Text style={styles.visaActiveText}>
+                              {profile?.account_verified
+                                ? "Verified"
+                                : "Unverified"}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Card number */}
+                        <View style={styles.visaNumberRow}>
+                          <Text style={styles.visaCardNumber}>
+                            {maskedPaymentAccount}
+                          </Text>
+                          <Pressable
+                            onPress={() => {
+                              if (showFullPaymentAccount)
+                                setShowFullPaymentAccount(false);
+                              else requestSecureAction("reveal");
+                            }}
+                            style={styles.visaRevealBtn}
+                          >
+                            <Ionicons
+                              name={
+                                showFullPaymentAccount
+                                  ? "eye-off-outline"
+                                  : "eye-outline"
+                              }
+                              size={16}
+                              color="#fff"
+                            />
                           </Pressable>
                         </View>
-                      </View>
-                    )}
-                  </LinearGradient>
+
+                        {/* Bottom: name + VISA logo */}
+                        <View style={styles.visaBottomRow}>
+                          <View>
+                            <Text style={styles.visaLabel}>Account Holder</Text>
+                            <Text style={styles.visaValue}>
+                              {profile?.name || "Business Account"}
+                            </Text>
+                          </View>
+                          <View style={{ alignItems: "flex-end" }}>
+                            <Text style={styles.visaLogo}>
+                              {(profile?.payment_platform || "Paystack")
+                                .toUpperCase()
+                                .slice(0, 8)}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.visaSubValue,
+                                styles.visaSubValueRight,
+                              ]}
+                            >
+                              {profile?.account_code || "Not set"}
+                            </Text>
+                          </View>
+                        </View>
+                      </LinearGradient>
+
+                      <Pressable
+                        onPress={() => requestSecureAction("edit")}
+                        style={[
+                          styles.visaEditButton,
+                          { borderColor: "#E2E8F0" },
+                        ]}
+                      >
+                        <Ionicons
+                          name="pencil-outline"
+                          size={14}
+                          color={colors.dark}
+                        />
+                        <Text
+                          style={[styles.visaEditText, { color: colors.dark }]}
+                        >
+                          Edit Payment Info
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                )}
+
+                {/* Menu Sections */}
+                {menuSections.map((section) => (
+                  <View
+                    key={section.title}
+                    style={[styles.card, { marginTop: 12 }]}
+                  >
+                    <Text style={styles.section}>{section.title}</Text>
+                    <View>
+                      {section.items.map((item, idx) => (
+                        <Pressable
+                          key={item.label}
+                          style={[
+                            styles.menuItem,
+                            idx < section.items.length - 1 &&
+                              styles.menuItemBorder,
+                          ]}
+                          onPress={() => item.action && item.action()}
+                        >
+                          <View style={styles.menuItemLeft}>
+                            <View style={styles.menuIconContainer}>
+                              <Ionicons
+                                name={item.icon}
+                                size={20}
+                                color={colors.muted}
+                              />
+                            </View>
+                            <Text style={styles.menuItemLabel}>
+                              {item.label}
+                            </Text>
+                          </View>
+                          <View style={styles.menuItemRight}>
+                            <Ionicons
+                              name="chevron-forward"
+                              size={18}
+                              color="#CBD5E1"
+                            />
+                          </View>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                ))}
+
+                {/* Danger Zone */}
+                <View
+                  style={[
+                    styles.card,
+                    {
+                      marginTop: 8,
+                      backgroundColor: "#FFF8F8",
+                      borderColor: "#FEE2E2",
+                    },
+                  ]}
+                >
+                  <Text style={styles.section}>Danger Zone</Text>
+                  <Text style={{ color: colors.muted, marginBottom: 12 }}>
+                    Permanently delete your seller account and all associated
+                    data. This action cannot be undone.
+                  </Text>
+                  <Pressable
+                    onPress={() =>
+                      Alert.alert(
+                        "Delete Account",
+                        "This permanently deletes your seller account and cannot be undone.",
+                        [
+                          { text: "Cancel", style: "cancel" },
+                          {
+                            text: "Continue",
+                            style: "destructive",
+                            onPress: () => requestSecureAction("delete"),
+                          },
+                        ],
+                      )
+                    }
+                    style={[
+                      styles.saveButton,
+                      { backgroundColor: "#EF4444", alignItems: "center" },
+                    ]}
+                  >
+                    <Text style={{ color: "#fff", fontWeight: "800" }}>
+                      Delete Account
+                    </Text>
+                  </Pressable>
                 </View>
 
                 {/* Quick actions removed */}
@@ -1370,267 +1768,7 @@ export const ProfileScreen = () => {
                     </Pressable>
                   </Pressable>
                 </Modal>
-
-                {/* Weekly Target Progress */}
-                {profile?.weekly_target > 0 && (
-                  <View style={styles.card}>
-                    <Text style={styles.section}>Weekly Target</Text>
-                    <View
-                      style={[
-                        { alignItems: "center", paddingVertical: 8 },
-                        isWide && {
-                          flexDirection: "row",
-                          justifyContent: "center",
-                          gap: 32,
-                        },
-                      ]}
-                    >
-                      {/* Explicit size container so SVG renders on web/desktop */}
-                      <View
-                        style={{
-                          width: 148,
-                          height: 148,
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <PieChart
-                          donut
-                          data={[
-                            {
-                              value: Math.min(
-                                weeklyOrderCount,
-                                profile.weekly_target,
-                              ),
-                              color: theme.primary,
-                            },
-                            {
-                              value: Math.max(
-                                profile.weekly_target - weeklyOrderCount,
-                                0,
-                              ),
-                              color: "#F1F5F9",
-                            },
-                          ]}
-                          radius={64}
-                          innerRadius={44}
-                          isAnimated
-                          animationDuration={800}
-                          centerLabelComponent={() => (
-                            <View style={{ alignItems: "center" }}>
-                              <Text
-                                style={{
-                                  fontSize: 18,
-                                  fontWeight: "900",
-                                  color: colors.dark,
-                                }}
-                              >
-                                {weeklyOrderCount}
-                              </Text>
-                              <Text
-                                style={{ fontSize: 10, color: colors.muted }}
-                              >
-                                / {profile.weekly_target}
-                              </Text>
-                            </View>
-                          )}
-                        />
-                      </View>
-                      <View
-                        style={{ alignItems: isWide ? "flex-start" : "center" }}
-                      >
-                        <Text
-                          style={{
-                            fontSize: 28,
-                            fontWeight: "900",
-                            color: colors.dark,
-                          }}
-                        >
-                          {weeklyOrderCount}
-                          <Text
-                            style={{
-                              fontSize: 16,
-                              color: colors.muted,
-                              fontWeight: "500",
-                            }}
-                          >
-                            {" "}
-                            / {profile.weekly_target} orders
-                          </Text>
-                        </Text>
-                        <Text
-                          style={{
-                            marginTop: 6,
-                            fontSize: 13,
-                            color:
-                              weeklyOrderCount >= profile.weekly_target
-                                ? colors.success
-                                : colors.muted,
-                            fontWeight: "600",
-                          }}
-                        >
-                          {weeklyOrderCount >= profile.weekly_target
-                            ? "🎯 Weekly target reached!"
-                            : `${profile.weekly_target - weeklyOrderCount} orders to go this week`}
-                        </Text>
-                        <View
-                          style={{
-                            marginTop: 12,
-                            height: 8,
-                            width: isWide ? 200 : 160,
-                            backgroundColor: "#F1F5F9",
-                            borderRadius: 6,
-                            overflow: "hidden",
-                          }}
-                        >
-                          <View
-                            style={{
-                              height: "100%",
-                              width: `${Math.min(
-                                (weeklyOrderCount / profile.weekly_target) *
-                                  100,
-                                100,
-                              )}%`,
-                              backgroundColor: theme.primary,
-                              borderRadius: 6,
-                            }}
-                          />
-                        </View>
-                      </View>
-                    </View>
-                  </View>
-                )}
-
-                {/* Seller Badges */}
-                <View style={styles.card}>
-                  <Text style={styles.section}>Seller Badges</Text>
-                  {!profile?.badges || profile.badges.length === 0 ? (
-                    <Text style={styles.subtitle}>No badges yet</Text>
-                  ) : (
-                    <View style={styles.badgesGrid}>
-                      {profile.badges.map((badgeId) => {
-                        const badge = BADGE_CONFIG[badgeId];
-                        if (!badge) return null;
-                        return (
-                          <View
-                            key={badgeId}
-                            style={[
-                              styles.badgeItemLarge,
-                              { backgroundColor: badge.color + "20" },
-                            ]}
-                          >
-                            <Ionicons
-                              name={badge.icon}
-                              size={16}
-                              color={badge.color}
-                            />
-                            <Text
-                              style={[
-                                styles.badgeItemText,
-                                { color: badge.color },
-                              ]}
-                            >
-                              {badge.label}
-                            </Text>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  )}
-                </View>
-
-                {/* Followers preview */}
-                <View style={styles.card}>
-                  <Text style={styles.section}>Followers</Text>
-                  {followers.length === 0 ? (
-                    <Text style={styles.subtitle}>No followers yet</Text>
-                  ) : (
-                    <FlatList
-                      data={followers.slice(0, 10)}
-                      keyExtractor={(i) => i.id}
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      renderItem={({ item }) => (
-                        <View style={styles.followerPreview}>
-                          {item.user?.avatar_url ? (
-                            <Image
-                              source={{ uri: item.user.avatar_url }}
-                              style={styles.followerAvatarSmall}
-                            />
-                          ) : (
-                            <View
-                              style={[
-                                styles.followerAvatarSmall,
-                                styles.avatarPlaceholder,
-                              ]}
-                            >
-                              <Ionicons
-                                name="person"
-                                size={20}
-                                color={colors.muted}
-                              />
-                            </View>
-                          )}
-                          <Text style={styles.followerNameSmall}>
-                            {item.user?.full_name || "Customer"}
-                          </Text>
-                        </View>
-                      )}
-                    />
-                  )}
-                </View>
-
-                {/* Top products */}
-                <View style={styles.card}>
-                  <Text style={styles.section}>Top Products</Text>
-                  <FlatList
-                    data={products
-                      .filter((p) => p.status === "active")
-                      .slice(0, 8)}
-                    keyExtractor={(p) => p.id}
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    renderItem={({ item }) => {
-                      const thumb =
-                        item.thumbnails?.[0] || item.thumbnail || null;
-                      return (
-                        <View style={styles.productPreview}>
-                          {thumb ? (
-                            <Image
-                              source={{ uri: thumb }}
-                              style={styles.productImageSmall}
-                            />
-                          ) : (
-                            <View
-                              style={[
-                                styles.productImageSmall,
-                                styles.avatarPlaceholder,
-                              ]}
-                            />
-                          )}
-                          <Text
-                            style={[
-                              styles.productTitleSmall,
-                              { color: theme.primary },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {item.title}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.productPriceSmall,
-                              { color: theme.primary },
-                            ]}
-                          >
-                            GH₵{Number(item.price || 0).toLocaleString()}
-                          </Text>
-                        </View>
-                      );
-                    }}
-                  />
-                </View>
-              </View>
+              </>
             )}
 
             {/* Followers Tab */}
@@ -1776,6 +1914,29 @@ export const ProfileScreen = () => {
             )}
           </ScrollView>
         )}
+
+        {/* Privacy Policy modal */}
+        <Modal
+          visible={privacyVisible}
+          animationType="slide"
+          transparent={false}
+          onRequestClose={() => setPrivacyVisible(false)}
+        >
+          <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 60 }}>
+            <View style={styles.card}>
+              <Text style={styles.section}>Privacy Policy</Text>
+              <Text style={{ color: colors.muted, marginBottom: 12 }}>
+                {PRIVACY_POLICY_TEXT}
+              </Text>
+              <Pressable
+                style={[styles.saveButton, { marginTop: 12 }]}
+                onPress={() => setPrivacyVisible(false)}
+              >
+                <Text style={{ color: "#fff", fontWeight: "800" }}>Close</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
+        </Modal>
 
         {/* App Version - Clickable */}
         <View style={styles.versionSection}>
@@ -2299,6 +2460,20 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     marginTop: 14,
+  },
+  heroSocialRow: {
+    flexDirection: "row",
+    marginTop: 10,
+    alignItems: "center",
+  },
+  socialIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+    backgroundColor: "rgba(255,255,255,0.12)",
   },
   statBox: {
     flex: 1,
@@ -2876,5 +3051,37 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 8,
     elevation: 4,
+  },
+  menuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+  },
+  menuItemLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  menuIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "#F8FAFC",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuItemLabel: {
+    fontWeight: "700",
+    color: colors.dark,
+  },
+  menuItemRight: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F7",
   },
 });

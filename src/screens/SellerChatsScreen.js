@@ -137,7 +137,12 @@ export const SellerChatsScreen = ({ navigation }) => {
           }
         }}
       >
-        <View style={styles.avatar}>
+        <View
+          style={[
+            styles.avatar,
+            { borderWidth: 0.5, borderColor: theme.primary, borderRadius: 28 },
+          ]}
+        >
           {item.user?.avatar_url ? (
             <Image
               source={{ uri: item.user.avatar_url }}
@@ -574,29 +579,26 @@ const styles = StyleSheet.create({
   conversationItem: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.03,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+    backgroundColor: "transparent",
+    borderRadius: 0,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    marginBottom: 0,
   },
   avatar: {
     width: 56,
     height: 56,
-    borderRadius: 18,
+    borderRadius: 28,
     backgroundColor: colors.light,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 16,
+    marginRight: 8,
     overflow: "hidden",
   },
   avatarImage: {
     width: "100%",
     height: "100%",
+    borderRadius: 28,
   },
   conversationContent: {
     flex: 1,

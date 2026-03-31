@@ -37,6 +37,8 @@ import { LoadingAnimation } from "./src/components/LoadingAnimation";
 import { useResponsive } from "./src/hooks/useResponsive";
 import { WebSidebar } from "./src/components/WebSidebar";
 import React, { useState, useEffect } from "react";
+import UpdateModal from "./src/components/UpdateModal";
+import { checkForUpdate } from "./src/services/updateService";
 
 import * as Linking from "expo-linking";
 
@@ -226,6 +228,28 @@ const DefaultSellerTabBar = ({
 // Wrapper that waits for seller context to finish loading
 const SellerApp = ({ onLogout }) => {
   const { loading: sellerLoading, needsSubaccount } = useSeller();
+  const [updateInfo, setUpdateInfo] = useState(null);
+  const [updateVisible, setUpdateVisible] = useState(false);
+
+  React.useEffect(() => {
+    let mounted = true;
+    const run = async () => {
+      try {
+        const res = await checkForUpdate("seller");
+        if (!mounted || !res) return;
+        if (res.updateAvailable) {
+          setUpdateInfo(res.updateRow);
+          setUpdateVisible(true);
+        }
+      } catch (e) {
+        console.warn("update check failed", e);
+      }
+    };
+    run();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   if (sellerLoading) {
     return (
@@ -234,10 +258,17 @@ const SellerApp = ({ onLogout }) => {
       </View>
     );
   }
+
   return (
     <View style={styles.appBackground}>
       <SellerStack onLogout={onLogout} />
       {needsSubaccount && <PaymentSetupPrompt />}
+      <UpdateModal
+        visible={updateVisible}
+        update={updateInfo}
+        force={updateInfo?.force_update}
+        onClose={() => setUpdateVisible(false)}
+      />
     </View>
   );
 };

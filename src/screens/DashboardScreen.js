@@ -39,7 +39,6 @@ export const DashboardScreen = () => {
     refresh,
     loading,
     logout,
-    deleteAccount,
     profile,
     updateProfile,
   } = useSeller();
@@ -48,9 +47,7 @@ export const DashboardScreen = () => {
     : getTheme(colors.primary);
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [selectedThemeId, setSelectedThemeId] = useState(null);
-  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deletePassword, setDeletePassword] = useState("");
+  
   const [applyToStore, setApplyToStore] = useState(
     profile?.theme_apply_store || false,
   );
@@ -80,43 +77,7 @@ export const DashboardScreen = () => {
     }
   };
 
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      "Delete Account",
-      "This permanently deletes your seller account and cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Continue",
-          style: "destructive",
-          onPress: () => setShowDeleteModal(true),
-        },
-      ],
-    );
-  };
-
-  const confirmDeleteWithPassword = async () => {
-    if (!deletePassword) {
-      Alert.alert("Password Required", "Enter your current password.");
-      return;
-    }
-
-    try {
-      setIsDeletingAccount(true);
-      const { error } = await deleteAccount(deletePassword);
-      if (error) {
-        Alert.alert(
-          "Delete Failed",
-          error.message || "Please try again later.",
-        );
-        return;
-      }
-      setShowDeleteModal(false);
-      setDeletePassword("");
-    } finally {
-      setIsDeletingAccount(false);
-    }
-  };
+  
   const latestOrders = orders.slice(0, 3);
   const trendingProducts = products
     .filter((p) => p.status === "active")
@@ -175,15 +136,6 @@ export const DashboardScreen = () => {
               </Text>
             </View>
             <View style={styles.heroHeaderButtons}>
-              {deleteAccount && (
-                <TouchableOpacity
-                  onPress={handleDeleteAccount}
-                  style={styles.logoutButton}
-                  disabled={isDeletingAccount}
-                >
-                  <Ionicons name="trash-outline" size={22} color="#fff" />
-                </TouchableOpacity>
-              )}
               {logout && (
                 <TouchableOpacity onPress={logout} style={styles.logoutButton}>
                   <Ionicons name="log-out-outline" size={24} color="#fff" />
@@ -806,54 +758,7 @@ export const DashboardScreen = () => {
         )}
       </ScrollView>
 
-      <Modal
-        transparent
-        visible={showDeleteModal}
-        animationType="fade"
-        onRequestClose={() => setShowDeleteModal(false)}
-      >
-        <View style={styles.deleteModalBackdrop}>
-          <View style={styles.deleteModalCard}>
-            <Text style={styles.deleteModalTitle}>Confirm With Password</Text>
-            <Text style={styles.deleteModalText}>
-              Enter your current password to permanently delete this seller
-              account.
-            </Text>
-            <TextInput
-              style={styles.deleteModalInput}
-              secureTextEntry
-              autoCapitalize="none"
-              value={deletePassword}
-              onChangeText={setDeletePassword}
-              placeholder="Current password"
-              placeholderTextColor={colors.muted}
-            />
-            <View style={styles.deleteModalActions}>
-              <Pressable
-                onPress={() => {
-                  setShowDeleteModal(false);
-                  setDeletePassword("");
-                }}
-                disabled={isDeletingAccount}
-                style={styles.deleteModalCancel}
-              >
-                <Text style={styles.deleteModalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={confirmDeleteWithPassword}
-                disabled={isDeletingAccount}
-                style={styles.deleteModalDelete}
-              >
-                {isDeletingAccount ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.deleteModalDeleteText}>Delete</Text>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      
     </ResponsiveContainer>
   );
 };
