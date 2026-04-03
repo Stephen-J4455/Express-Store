@@ -47,6 +47,19 @@ const DEFAULT_CATEGORIES = [
   { id: "default-home", name: "Home", icon: "home-outline", color: "#EAF7F0" },
 ];
 
+const normalizeRole = (role) =>
+  typeof role === "string" && role.trim().length ? role.toLowerCase() : null;
+
+const hasSellerRole = (user) => {
+  const metadataRole = normalizeRole(user?.user_metadata?.role);
+  if (metadataRole === "seller") return true;
+
+  const appRoles = Array.isArray(user?.app_metadata?.roles)
+    ? user.app_metadata.roles.map((r) => normalizeRole(r))
+    : [];
+  return appRoles.includes("seller");
+};
+
 export const SellerProvider = ({ children }) => {
   // Seed with defaults so UI always has something to show
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
@@ -64,6 +77,7 @@ export const SellerProvider = ({ children }) => {
   const appStateRef = useRef(AppState.currentState);
   const presenceChannelRef = useRef(null);
   const authSyncInFlightRef = useRef(false);
+  const chatsRefreshTimerRef = useRef(null);
 
   const updateLastSeen = useCallback(async (currentSellerId) => {
     if (!supabase || !currentSellerId) return;
@@ -146,6 +160,7 @@ export const SellerProvider = ({ children }) => {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) return null;
+      if (!hasSellerRole(user)) return null;
 
       // Helper to either fetch or create seller row for this user
       const ensureSellerRecord = async () => {
@@ -340,29 +355,45 @@ export const SellerProvider = ({ children }) => {
     }
   }, []);
 
-  const fetchAll = useCallback(async () => {
-    console.log("fetchAll called, supabase:", !!supabase);
-    if (!supabase) return;
-    setLoading(true);
-    setError("");
+  const scheduleChatsRefresh = useCallback(
+    (sellerIdParam) => {
+      if (!sellerIdParam) return;
 
-    try {
-      const seller = await getSellerId();
-      if (!seller) {
-        setCategories((prev) => (prev.length ? prev : DEFAULT_CATEGORIES));
-        setLoading(false);
-        return;
+      if (chatsRefreshTimerRef.current) {
+        clearTimeout(chatsRefreshTimerRef.current);
       }
 
-      setSellerId(seller.id);
+      chatsRefreshTimerRef.current = setTimeout(() => {
+        fetchChats(sellerIdParam);
+      }, 180);
+    },
+    [fetchChats],
+  );
 
-      const [categoriesRes, productsRes, ordersRes, profileRes] =
-        await Promise.all([
-          supabase.from("express_categories").select("id,name,icon,color"),
-          supabase
-            .from("express_products")
-            .select(
-              `
+  const fetchAll = useCallback(
+    async ({ showLoader = true } = {}) => {
+      console.log("fetchAll called, supabase:", !!supabase);
+      if (!supabase) return;
+      if (showLoader) setLoading(true);
+      setError("");
+
+      try {
+        const seller = await getSellerId();
+        if (!seller) {
+          setCategories((prev) => (prev.length ? prev : DEFAULT_CATEGORIES));
+          if (showLoader) setLoading(false);
+          return;
+        }
+
+        setSellerId(seller.id);
+
+        const [categoriesRes, productsRes, ordersRes, profileRes] =
+          await Promise.all([
+            supabase.from("express_categories").select("id,name,icon,color"),
+            supabase
+              .from("express_products")
+              .select(
+                `
               *,
               flash_sale:express_flash_sales(
                 id,
@@ -375,148 +406,153 @@ export const SellerProvider = ({ children }) => {
                 is_active
               )
             `,
-            )
-            .eq("seller_id", seller.id)
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("express_orders")
-            .select(
-              "id,order_number,user_id,status,total,service_fee,shipping_fee,service_fee_pct,customer,shipping_address,eta,payment_status,created_at,items:express_order_items(id,title,quantity,price,thumbnail,shipping_fee)",
-            )
-            .eq("seller_id", seller.id)
-            .order("created_at", { ascending: false })
-            .limit(100),
-          supabase
-            .from("express_sellers")
-            .select("*")
-            .eq("id", seller.id)
-            .single(),
-        ]);
+              )
+              .eq("seller_id", seller.id)
+              .order("created_at", { ascending: false }),
+            supabase
+              .from("express_orders")
+              .select(
+                "id,order_number,user_id,status,total,service_fee,shipping_fee,service_fee_pct,customer,shipping_address,eta,payment_status,created_at,items:express_order_items(id,title,quantity,price,thumbnail,shipping_fee)",
+              )
+              .eq("seller_id", seller.id)
+              .order("created_at", { ascending: false })
+              .limit(100),
+            supabase
+              .from("express_sellers")
+              .select("*")
+              .eq("id", seller.id)
+              .single(),
+          ]);
 
-      // Fetch global settings (service_fee_percentage, etc.)
-      let settingsMap = {};
-      try {
-        const { data: settingsData, error: settingsErr } = await supabase
-          .from("express_settings")
-          .select("key, value");
-        if (!settingsErr && settingsData) {
-          settingsData.forEach((s) => {
-            settingsMap[s.key] = s.value;
-          });
-        }
-      } catch (settingsErr) {
-        console.warn("Failed to fetch settings:", settingsErr);
-      }
-      setSettings(settingsMap);
-
-      if (categoriesRes.error) throw categoriesRes.error;
-      if (productsRes.error) throw productsRes.error;
-      if (ordersRes.error) throw ordersRes.error;
-      if (profileRes.error) throw profileRes.error;
-
-      // Fetch payment records for this seller's orders to track Paystack fee deductions
-      const orderIds = (ordersRes.data || []).map((o) => o.id).filter(Boolean);
-      let paymentsData = [];
-      if (orderIds.length > 0) {
+        // Fetch global settings (service_fee_percentage, etc.)
+        let settingsMap = {};
         try {
-          const { data: pData, error: pErr } = await supabase
-            .from("express_payments")
-            .select(
-              "id,order_id,amount,paystack_fee_pesewas,paystack_fee_split,service_fee_amount,platform_commission,seller_amount,platform_amount,status,created_at",
-            )
-            .in("order_id", orderIds)
-            .eq("status", "success")
-            .order("created_at", { ascending: false });
-          if (!pErr) {
-            paymentsData = pData || [];
-          } else {
-            console.warn("Payment records fetch error (non-fatal):", pErr);
+          const { data: settingsData, error: settingsErr } = await supabase
+            .from("express_settings")
+            .select("key, value");
+          if (!settingsErr && settingsData) {
+            settingsData.forEach((s) => {
+              settingsMap[s.key] = s.value;
+            });
           }
-        } catch (pCatchErr) {
-          console.warn("Failed to fetch seller payment records:", pCatchErr);
+        } catch (settingsErr) {
+          console.warn("Failed to fetch settings:", settingsErr);
         }
-      }
+        setSettings(settingsMap);
 
-      // Fetch reviews for items that belong to this seller
-      const productIds = productsRes.data?.map((p) => p.id) || [];
-      let reviewsData = [];
-      if (productIds.length > 0) {
-        try {
-          const { data: revs, error: revsError } = await supabase
-            .from("express_reviews")
-            .select("*, express_profiles(full_name, avatar_url)")
-            .in("product_id", productIds)
-            .order("created_at", { ascending: false });
+        if (categoriesRes.error) throw categoriesRes.error;
+        if (productsRes.error) throw productsRes.error;
+        if (ordersRes.error) throw ordersRes.error;
+        if (profileRes.error) throw profileRes.error;
 
-          if (revsError) {
-            console.error("Reviews fetch error:", revsError);
-            // Fallback: try fetching without the join if join fails
-            if (
-              revsError.code === "PGRST200" ||
-              revsError.message.includes("relationship")
-            ) {
-              const { data: fallbackRevs } = await supabase
-                .from("express_reviews")
-                .select("*")
-                .in("product_id", productIds)
-                .order("created_at", { ascending: false });
-              reviewsData = fallbackRevs || [];
+        // Fetch payment records for this seller's orders to track Paystack fee deductions
+        const orderIds = (ordersRes.data || [])
+          .map((o) => o.id)
+          .filter(Boolean);
+        let paymentsData = [];
+        if (orderIds.length > 0) {
+          try {
+            const { data: pData, error: pErr } = await supabase
+              .from("express_payments")
+              .select(
+                "id,order_id,amount,paystack_fee_pesewas,paystack_fee_split,service_fee_amount,platform_commission,seller_amount,platform_amount,status,created_at",
+              )
+              .in("order_id", orderIds)
+              .eq("status", "success")
+              .order("created_at", { ascending: false });
+            if (!pErr) {
+              paymentsData = pData || [];
+            } else {
+              console.warn("Payment records fetch error (non-fatal):", pErr);
             }
-          } else {
-            reviewsData = revs || [];
+          } catch (pCatchErr) {
+            console.warn("Failed to fetch seller payment records:", pCatchErr);
           }
-        } catch (revCatchError) {
-          console.error("Critical reviews fetch error:", revCatchError);
         }
-      }
 
-      // Fetch chats separately with proper user mapping
-      await fetchChats(seller.id);
+        // Fetch reviews for items that belong to this seller
+        const productIds = productsRes.data?.map((p) => p.id) || [];
+        let reviewsData = [];
+        if (productIds.length > 0) {
+          try {
+            const { data: revs, error: revsError } = await supabase
+              .from("express_reviews")
+              .select("*, express_profiles(full_name, avatar_url)")
+              .in("product_id", productIds)
+              .order("created_at", { ascending: false });
 
-      setCategories(categoriesRes.data || DEFAULT_CATEGORIES);
-      setProducts(productsRes.data || []);
-      setOrders(ordersRes.data || []);
-      setReviews(reviewsData);
-      setPayments(paymentsData);
+            if (revsError) {
+              console.error("Reviews fetch error:", revsError);
+              // Fallback: try fetching without the join if join fails
+              if (
+                revsError.code === "PGRST200" ||
+                revsError.message.includes("relationship")
+              ) {
+                const { data: fallbackRevs } = await supabase
+                  .from("express_reviews")
+                  .select("*")
+                  .in("product_id", productIds)
+                  .order("created_at", { ascending: false });
+                reviewsData = fallbackRevs || [];
+              }
+            } else {
+              reviewsData = revs || [];
+            }
+          } catch (revCatchError) {
+            console.error("Critical reviews fetch error:", revCatchError);
+          }
+        }
 
-      // Compute aggregated rating from reviews if available and attach to profile
-      let profileObj = profileRes.data || {};
-      try {
-        if (reviewsData && reviewsData.length > 0) {
-          const numericRatings = reviewsData
-            .map((r) => Number(r.rating || r.stars || 0))
-            .filter((n) => !Number.isNaN(n));
-          if (numericRatings.length > 0) {
-            const avg =
-              numericRatings.reduce((s, v) => s + v, 0) / numericRatings.length;
-            profileObj = { ...profileObj, rating: Math.round(avg * 10) / 10 };
+        // Fetch chats separately with proper user mapping
+        await fetchChats(seller.id);
+
+        setCategories(categoriesRes.data || DEFAULT_CATEGORIES);
+        setProducts(productsRes.data || []);
+        setOrders(ordersRes.data || []);
+        setReviews(reviewsData);
+        setPayments(paymentsData);
+
+        // Compute aggregated rating from reviews if available and attach to profile
+        let profileObj = profileRes.data || {};
+        try {
+          if (reviewsData && reviewsData.length > 0) {
+            const numericRatings = reviewsData
+              .map((r) => Number(r.rating || r.stars || 0))
+              .filter((n) => !Number.isNaN(n));
+            if (numericRatings.length > 0) {
+              const avg =
+                numericRatings.reduce((s, v) => s + v, 0) /
+                numericRatings.length;
+              profileObj = { ...profileObj, rating: Math.round(avg * 10) / 10 };
+            } else if (profileObj.rating == null) {
+              profileObj = { ...profileObj, rating: null };
+            }
           } else if (profileObj.rating == null) {
             profileObj = { ...profileObj, rating: null };
           }
-        } else if (profileObj.rating == null) {
-          profileObj = { ...profileObj, rating: null };
+        } catch (err) {
+          console.error("Error computing aggregated rating:", err);
         }
-      } catch (err) {
-        console.error("Error computing aggregated rating:", err);
-      }
 
-      setProfile(profileObj);
+        setProfile(profileObj);
 
-      // Detect missing Paystack subaccount
-      try {
-        const hasPaystack =
-          profileObj?.payment_platform === "paystack" &&
-          profileObj?.payment_account;
-        setNeedsSubaccount(!hasPaystack);
-      } catch (err) {
-        setNeedsSubaccount(false);
+        // Detect missing Paystack subaccount
+        try {
+          const hasPaystack =
+            profileObj?.payment_platform === "paystack" &&
+            profileObj?.payment_account;
+          setNeedsSubaccount(!hasPaystack);
+        } catch (err) {
+          setNeedsSubaccount(false);
+        }
+        if (showLoader) setLoading(false);
+      } catch (error) {
+        console.error("❌ fetchAll error:", error);
+        if (showLoader) setLoading(false);
       }
-      setLoading(false);
-    } catch (error) {
-      console.error("❌ fetchAll error:", error);
-      setLoading(false);
-    }
-  }, [getSellerId, fetchChats]);
+    },
+    [getSellerId, fetchChats],
+  );
 
   const syncPaystackAndDatabase = useCallback(
     async (sellerIdParam = null) => {
@@ -754,7 +790,40 @@ export const SellerProvider = ({ children }) => {
         },
         (payload) => {
           // Re-fetch all chats to ensure user relationship data is preserved
-          fetchChats(sellerId);
+          scheduleChatsRefresh(sellerId);
+        },
+      )
+      .subscribe();
+
+    // Subscribe to message inserts/updates so conversation list reflects new messages in realtime.
+    const chatMessagesChannel = supabase
+      .channel("seller-chat-messages")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "express_chat_messages",
+        },
+        async (payload) => {
+          const conversationId =
+            payload?.new?.conversation_id || payload?.old?.conversation_id;
+          if (!conversationId) return;
+
+          try {
+            const { data, error } = await supabase
+              .from("express_chat_conversations")
+              .select("id")
+              .eq("id", conversationId)
+              .eq("seller_id", sellerId)
+              .maybeSingle();
+
+            if (!error && data?.id) {
+              scheduleChatsRefresh(sellerId);
+            }
+          } catch (err) {
+            console.error("Error handling chat message realtime update:", err);
+          }
         },
       )
       .subscribe();
@@ -764,8 +833,13 @@ export const SellerProvider = ({ children }) => {
       productsChannel?.unsubscribe?.();
       flashSalesChannel?.unsubscribe?.();
       chatsChannel?.unsubscribe?.();
+      chatMessagesChannel?.unsubscribe?.();
+      if (chatsRefreshTimerRef.current) {
+        clearTimeout(chatsRefreshTimerRef.current);
+        chatsRefreshTimerRef.current = null;
+      }
     };
-  }, [sellerId, fetchChats]);
+  }, [sellerId, scheduleChatsRefresh]);
 
   useEffect(() => {
     fetchAll();
@@ -776,6 +850,7 @@ export const SellerProvider = ({ children }) => {
 
     const runAuthSync = async (session) => {
       if (!session?.user?.id || authSyncInFlightRef.current) return;
+      if (!hasSellerRole(session.user)) return;
 
       authSyncInFlightRef.current = true;
       try {
@@ -1207,6 +1282,8 @@ export const SellerProvider = ({ children }) => {
           const filtered = { ...updates };
           // Remove theme fields that may not exist in older schemas
           delete filtered.theme_color;
+          // Remove optional profile fields that may be added by newer migrations
+          delete filtered.store_description;
           Object.keys(filtered).forEach((k) => {
             if (k.startsWith("theme_apply") || k.startsWith("apply_theme")) {
               delete filtered[k];
@@ -1242,7 +1319,8 @@ export const SellerProvider = ({ children }) => {
     error,
     metrics,
     settings,
-    refresh: fetchAll,
+    refresh: () => fetchAll({ showLoader: true }),
+    refreshData: () => fetchAll({ showLoader: false }),
     refreshChats: () => fetchChats(sellerId),
     createProduct,
     updateProduct,

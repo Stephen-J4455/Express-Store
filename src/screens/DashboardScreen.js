@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
   TouchableOpacity,
+  ImageBackground,
   Dimensions,
   Platform,
   Modal,
@@ -26,6 +27,37 @@ import { OrderCard } from "../components/OrderCard";
 import { StatusPill } from "../components/StatusPill";
 import { ResponsiveContainer } from "../components/ResponsiveContainer";
 import { useResponsive } from "../hooks/useResponsive";
+import { supabase } from "../../supabase";
+
+const PROFILE_BUCKET = "profile";
+
+const getProfileAvatarValue = (profile) => {
+  const candidates = [
+    profile?.avatar,
+    profile?.avatar_url,
+    profile?.profile_image,
+  ];
+  for (const candidate of candidates) {
+    const value = String(candidate || "").trim();
+    if (value) return value;
+  }
+  return "";
+};
+
+const resolveProfileImageUri = (rawValue) => {
+  const value = String(rawValue || "").trim();
+  if (!value) return "";
+
+  if (/^https?:\/\//i.test(value) || value.startsWith("file://")) {
+    return value;
+  }
+
+  const normalizedPath = value.replace(/^\/+/, "");
+  const { data } = supabase.storage
+    .from(PROFILE_BUCKET)
+    .getPublicUrl(normalizedPath);
+  return data?.publicUrl || "";
+};
 
 export const DashboardScreen = () => {
   const navigation = useNavigation();
@@ -45,9 +77,12 @@ export const DashboardScreen = () => {
   const theme = profile?.theme_apply_store
     ? getTheme(profile?.theme_color || colors.primary)
     : getTheme(colors.primary);
+  const heroBackgroundUri = resolveProfileImageUri(
+    getProfileAvatarValue(profile),
+  );
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [selectedThemeId, setSelectedThemeId] = useState(null);
-  
+
   const [applyToStore, setApplyToStore] = useState(
     profile?.theme_apply_store || false,
   );
@@ -77,7 +112,6 @@ export const DashboardScreen = () => {
     }
   };
 
-  
   const latestOrders = orders.slice(0, 3);
   const trendingProducts = products
     .filter((p) => p.status === "active")
@@ -121,40 +155,97 @@ export const DashboardScreen = () => {
           />
         }
       >
-        <LinearGradient
-          colors={[theme.gradientStart, theme.gradientEnd]}
-          style={[styles.hero, { shadowColor: theme.primary }]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-        >
-          <View style={styles.heroHeader}>
-            <View>
-              <Text style={styles.heroKicker}>Merchant Portal</Text>
-              <Text style={styles.heroTitle}>{vendorName}</Text>
-              <Text style={styles.heroSubtitle}>
-                Monitoring your store's performance and fulfillment.
-              </Text>
-            </View>
-            <View style={styles.heroHeaderButtons}>
-              {logout && (
-                <TouchableOpacity onPress={logout} style={styles.logoutButton}>
-                  <Ionicons name="log-out-outline" size={24} color="#fff" />
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
+        {heroBackgroundUri ? (
+          <ImageBackground
+            source={{ uri: heroBackgroundUri }}
+            style={[
+              styles.hero,
+              styles.heroImageBackground,
+              { shadowColor: theme.primary },
+            ]}
+            imageStyle={styles.heroImage}
+          >
+            <LinearGradient
+              colors={["rgba(15,23,42,0.25)", "rgba(15,23,42,0.75)"]}
+              style={styles.heroOverlay}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <View style={styles.heroHeader}>
+                <View>
+                  <Text style={styles.heroKicker}>Merchant Portal</Text>
+                  <Text style={styles.heroTitle}>{vendorName}</Text>
+                  <Text style={styles.heroSubtitle}>
+                    Monitoring your store's performance and fulfillment.
+                  </Text>
+                </View>
+                <View style={styles.heroHeaderButtons}>
+                  {logout && (
+                    <TouchableOpacity
+                      onPress={logout}
+                      style={styles.logoutButton}
+                    >
+                      <Ionicons name="log-out-outline" size={24} color="#fff" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
 
-          <View style={styles.heroActions}>
-            <View style={[styles.heroChip, { backgroundColor: theme.primary }]}>
-              <Ionicons name="storefront" size={16} color="#fff" />
-              <Text style={styles.heroChipText}>Store Active</Text>
+              <View style={styles.heroActions}>
+                <View
+                  style={[styles.heroChip, { backgroundColor: theme.primary }]}
+                >
+                  <Ionicons name="storefront" size={16} color="#fff" />
+                  <Text style={styles.heroChipText}>Store Active</Text>
+                </View>
+                <TouchableOpacity style={styles.heroAction} onPress={refresh}>
+                  <Ionicons name="sync" size={16} color="#fff" />
+                  <Text style={styles.heroActionText}>Sync Data</Text>
+                </TouchableOpacity>
+              </View>
+            </LinearGradient>
+          </ImageBackground>
+        ) : (
+          <LinearGradient
+            colors={[theme.gradientStart, theme.gradientEnd]}
+            style={[styles.hero, { shadowColor: theme.primary }]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          >
+            <View style={styles.heroHeader}>
+              <View>
+                <Text style={styles.heroKicker}>Merchant Portal</Text>
+                <Text style={styles.heroTitle}>{vendorName}</Text>
+                <Text style={styles.heroSubtitle}>
+                  Monitoring your store's performance and fulfillment.
+                </Text>
+              </View>
+              <View style={styles.heroHeaderButtons}>
+                {logout && (
+                  <TouchableOpacity
+                    onPress={logout}
+                    style={styles.logoutButton}
+                  >
+                    <Ionicons name="log-out-outline" size={24} color="#fff" />
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
-            <TouchableOpacity style={styles.heroAction} onPress={refresh}>
-              <Ionicons name="sync" size={16} color="#fff" />
-              <Text style={styles.heroActionText}>Sync Data</Text>
-            </TouchableOpacity>
-          </View>
-        </LinearGradient>
+
+            <View style={styles.heroActions}>
+              <View
+                style={[styles.heroChip, { backgroundColor: theme.primary }]}
+              >
+                <Ionicons name="storefront" size={16} color="#fff" />
+                <Text style={styles.heroChipText}>Store Active</Text>
+              </View>
+              <TouchableOpacity style={styles.heroAction} onPress={refresh}>
+                <Ionicons name="sync" size={16} color="#fff" />
+                <Text style={styles.heroActionText}>Sync Data</Text>
+              </TouchableOpacity>
+            </View>
+          </LinearGradient>
+        )}
 
         <View style={styles.statsGrid}>
           <StatCard
@@ -757,8 +848,6 @@ export const DashboardScreen = () => {
           </View>
         )}
       </ScrollView>
-
-      
     </ResponsiveContainer>
   );
 };
@@ -781,6 +870,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 20,
     elevation: 10,
+  },
+  heroImageBackground: {
+    overflow: "hidden",
+    padding: 0,
+  },
+  heroImage: {
+    borderRadius: 24,
+  },
+  heroOverlay: {
+    borderRadius: 24,
+    padding: 24,
   },
   themeSwatchesContainer: {
     flexDirection: "row",

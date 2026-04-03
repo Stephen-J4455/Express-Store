@@ -70,6 +70,8 @@ const CatalogScreen = () => {
   const [description, setDescription] = useState("");
   const [discount, setDiscount] = useState(0);
   const [imageUris, setImageUris] = useState([]);
+  const [existingImageUrls, setExistingImageUrls] = useState([]);
+  const [removingImageUrl, setRemovingImageUrl] = useState(null);
   const [selectedSizes, setSelectedSizes] = useState([]);
   const [selectedColors, setSelectedColors] = useState([]);
   const [quantity, setQuantity] = useState("");
@@ -188,6 +190,44 @@ const CatalogScreen = () => {
     });
   }, [products]);
 
+  const resetProductFormState = () => {
+    setTitle("");
+    setPrice("");
+    setShippingFee("");
+    setCategory("");
+    setDescription("");
+    setDiscount(0);
+    setImageUris([]);
+    setExistingImageUrls([]);
+    setRemovingImageUrl(null);
+    setSelectedSizes([]);
+    setSelectedColors([]);
+    setQuantity("");
+    setSku("");
+    setWeight("");
+    setBarcode("");
+    setVendor("");
+    setCompareAtPrice("");
+    setCostPrice("");
+    setTags("");
+    setTrackInventory(true);
+    setAllowBackorder(false);
+    setWeightUnit("kg");
+    setSlug("");
+    setSpecifications([]);
+    setEditingProduct(null);
+  };
+
+  const openCreateModal = () => {
+    resetProductFormState();
+    setModalVisible(true);
+  };
+
+  const closeProductModal = () => {
+    setModalVisible(false);
+    resetProductFormState();
+  };
+
   const openEditModal = (product) => {
     setEditingProduct(product);
     setTitle(product.title || "");
@@ -218,12 +258,110 @@ const CatalogScreen = () => {
     } else {
       setSpecifications([]);
     }
+    const currentImages = Array.isArray(product.thumbnails)
+      ? product.thumbnails.filter(Boolean)
+      : product.thumbnail
+        ? [product.thumbnail]
+        : [];
+    setExistingImageUrls(currentImages);
+    setRemovingImageUrl(null);
     setImageUris([]);
     setModalVisible(true);
   };
 
+  const getStoragePathFromUrl = (url) => {
+    if (!url || typeof url !== "string") return null;
+
+    const cleanUrl = url.split("?")[0];
+    const publicToken = "/storage/v1/object/public/express-products/";
+    const signedToken = "/storage/v1/object/sign/express-products/";
+
+    if (cleanUrl.includes(publicToken)) {
+      return decodeURIComponent(cleanUrl.split(publicToken)[1] || "");
+    }
+
+    if (cleanUrl.includes(signedToken)) {
+      return decodeURIComponent(cleanUrl.split(signedToken)[1] || "");
+    }
+
+    if (cleanUrl.startsWith("products/")) {
+      return cleanUrl;
+    }
+
+    return null;
+  };
+
+  const deleteProductImageFromStorage = async (url) => {
+    const objectPath = getStoragePathFromUrl(url);
+    if (!objectPath) {
+      throw new Error("Could not determine image storage path");
+    }
+
+    const { error } = await supabase.storage
+      .from("express-products")
+      .remove([objectPath]);
+
+    if (error) {
+      throw new Error(error.message || "Failed to remove image from storage");
+    }
+  };
+
+  const handleRemoveExistingImage = async (url) => {
+    if (!editingProduct || removingImageUrl) return;
+
+    const nextImages = existingImageUrls.filter((imageUrl) => imageUrl !== url);
+    setRemovingImageUrl(url);
+
+    try {
+      await deleteProductImageFromStorage(url);
+      await updateProduct(editingProduct.id, {
+        thumbnail: nextImages[0] || null,
+        thumbnails: nextImages.length ? nextImages : null,
+        status: "pending",
+      });
+
+      setExistingImageUrls(nextImages);
+      setEditingProduct((prev) =>
+        prev
+          ? {
+              ...prev,
+              thumbnail: nextImages[0] || null,
+              thumbnails: nextImages,
+            }
+          : prev,
+      );
+      setSelectedProduct((prev) =>
+        prev && prev.id === editingProduct.id
+          ? {
+              ...prev,
+              thumbnail: nextImages[0] || null,
+              thumbnails: nextImages,
+              status: "pending",
+            }
+          : prev,
+      );
+      setViewingProduct((prev) =>
+        prev && prev.id === editingProduct.id
+          ? {
+              ...prev,
+              thumbnail: nextImages[0] || null,
+              thumbnails: nextImages,
+              status: "pending",
+            }
+          : prev,
+      );
+
+      toast.success("Image removed", "Image deleted from storage and product");
+    } catch (error) {
+      toast.error("Delete failed", error.message || "Could not delete image");
+    } finally {
+      setRemovingImageUrl(null);
+    }
+  };
+
   const pickImage = async () => {
-    if (imageUris.length >= 5) {
+    const currentImageCount = imageUris.length + existingImageUrls.length;
+    if (currentImageCount >= 5) {
       toast.warning("Maximum images", "You can upload up to 5 images");
       return;
     }
@@ -236,7 +374,7 @@ const CatalogScreen = () => {
       mediaTypes: ["images"],
       quality: 1,
       allowsMultipleSelection: true,
-      selectionLimit: 5 - imageUris.length,
+      selectionLimit: 5 - currentImageCount,
     });
     if (!result.canceled) {
       const newUris = result.assets.map((asset) => asset.uri);
@@ -476,6 +614,10 @@ const CatalogScreen = () => {
         imageUrls = await uploadImages(imageUris);
       }
 
+      const mergedImages = editingProduct
+        ? [...existingImageUrls, ...imageUrls]
+        : imageUrls;
+
       // Convert specifications array to object
       const specificationsObj = {};
       specifications.forEach((spec) => {
@@ -520,16 +662,14 @@ const CatalogScreen = () => {
           Object.keys(specificationsObj).length > 0 ? specificationsObj : null,
       };
 
-      if (imageUrls.length > 0) {
-        productData.thumbnails = imageUrls;
-      }
+      productData.thumbnail = mergedImages[0] || null;
+      productData.thumbnails = mergedImages.length ? mergedImages : null;
 
       if (editingProduct) {
         // Set status to pending after edit (requires re-approval)
         productData.status = "pending";
         await updateProduct(editingProduct.id, productData);
       } else {
-        productData.thumbnails = imageUrls;
         await createProduct(productData);
       }
 
@@ -541,6 +681,7 @@ const CatalogScreen = () => {
       setDescription("");
       setDiscount(0);
       setImageUris([]);
+      setExistingImageUrls([]);
       setSelectedSizes([]);
       setSelectedColors([]);
       setQuantity("");
@@ -587,7 +728,7 @@ const CatalogScreen = () => {
                 styles.primaryButton,
                 { backgroundColor: theme.primary, borderColor: theme.primary },
               ]}
-              onPress={() => setModalVisible(true)}
+              onPress={openCreateModal}
             >
               <Ionicons name="add-circle-outline" size={20} color="#fff" />
               <Text style={styles.primaryButtonText}>Add New</Text>
@@ -825,7 +966,7 @@ const CatalogScreen = () => {
           animationType="slide"
           presentationStyle="overFullScreen"
           statusBarTranslucent
-          onRequestClose={() => setModalVisible(false)}
+          onRequestClose={closeProductModal}
         >
           <ScrollView style={styles.modalContainer}>
             <View
@@ -838,10 +979,7 @@ const CatalogScreen = () => {
                 style={[styles.modalHeader, { paddingTop: insets.top + 12 }]}
               >
                 <Pressable
-                  onPress={() => {
-                    setModalVisible(false);
-                    setEditingProduct(null);
-                  }}
+                  onPress={closeProductModal}
                   style={styles.cancelButton}
                 >
                   <Ionicons name="close" size={24} color={theme.primary} />
@@ -1129,7 +1267,7 @@ const CatalogScreen = () => {
                   </ScrollView>
                 )}
 
-                <Text style={styles.label}>Upload Images (up to 5)</Text>
+                <Text style={styles.label}>Product Images (up to 5)</Text>
                 <Pressable
                   style={[styles.imagePicker, { borderColor: theme.primary }]}
                   onPress={pickImage}
@@ -1140,33 +1278,88 @@ const CatalogScreen = () => {
                       style={[styles.imagePickerText, { color: theme.primary }]}
                     >
                       {imageUris.length > 0
-                        ? `${imageUris.length} image${imageUris.length > 1 ? "s" : ""} selected`
+                        ? `${imageUris.length} new image${imageUris.length > 1 ? "s" : ""} selected`
                         : "Tap to select images"}
                     </Text>
                   </View>
                 </Pressable>
-                {imageUris.length > 0 && (
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    style={styles.imagePreviewContainer}
-                  >
-                    {imageUris.map((uri, index) => (
-                      <View key={index} style={styles.imagePreviewWrapper}>
-                        <Image source={{ uri }} style={styles.previewImage} />
-                        <Pressable
-                          style={styles.removeImageButton}
-                          onPress={() => {
-                            setImageUris((prev) =>
-                              prev.filter((_, i) => i !== index),
-                            );
-                          }}
+
+                {editingProduct && existingImageUrls.length > 0 && (
+                  <>
+                    <View style={styles.imageSectionHeader}>
+                      <Text style={styles.hint}>Current product images</Text>
+                    </View>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={styles.imagePreviewContainer}
+                    >
+                      {existingImageUrls.map((uri, index) => (
+                        <View
+                          key={`${uri}-${index}`}
+                          style={styles.imagePreviewWrapper}
                         >
-                          <Ionicons name="close-circle" size={24} color="red" />
-                        </Pressable>
-                      </View>
-                    ))}
-                  </ScrollView>
+                          <Image source={{ uri }} style={styles.previewImage} />
+                          <View style={styles.existingImageTag}>
+                            <Text style={styles.existingImageTagText}>
+                              Current
+                            </Text>
+                          </View>
+                          <Pressable
+                            style={styles.removeImageButton}
+                            onPress={() => handleRemoveExistingImage(uri)}
+                            disabled={removingImageUrl === uri}
+                          >
+                            {removingImageUrl === uri ? (
+                              <ActivityIndicator size="small" color="#EF4444" />
+                            ) : (
+                              <Ionicons
+                                name="trash"
+                                size={18}
+                                color="#EF4444"
+                              />
+                            )}
+                          </Pressable>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  </>
+                )}
+
+                {imageUris.length > 0 && (
+                  <>
+                    <View style={styles.imageSectionHeader}>
+                      <Text style={styles.hint}>New images to upload</Text>
+                    </View>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={styles.imagePreviewContainer}
+                    >
+                      {imageUris.map((uri, index) => (
+                        <View key={index} style={styles.imagePreviewWrapper}>
+                          <Image source={{ uri }} style={styles.previewImage} />
+                          <View style={styles.newImageTag}>
+                            <Text style={styles.newImageTagText}>New</Text>
+                          </View>
+                          <Pressable
+                            style={styles.removeImageButton}
+                            onPress={() => {
+                              setImageUris((prev) =>
+                                prev.filter((_, i) => i !== index),
+                              );
+                            }}
+                          >
+                            <Ionicons
+                              name="close-circle"
+                              size={22}
+                              color="#EF4444"
+                            />
+                          </Pressable>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  </>
                 )}
 
                 <Text style={styles.label}>Badges</Text>
@@ -2263,9 +2456,41 @@ const styles = StyleSheet.create({
   imagePreviewContainer: {
     marginTop: 8,
   },
+  imageSectionHeader: {
+    marginTop: 8,
+    marginBottom: 2,
+  },
   imagePreviewWrapper: {
     position: "relative",
     marginRight: 8,
+  },
+  existingImageTag: {
+    position: "absolute",
+    left: 6,
+    bottom: 6,
+    backgroundColor: "rgba(17,24,39,0.75)",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  existingImageTagText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  newImageTag: {
+    position: "absolute",
+    left: 6,
+    bottom: 6,
+    backgroundColor: "rgba(37,99,235,0.9)",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  newImageTagText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
   },
   removeImageButton: {
     position: "absolute",
@@ -2273,6 +2498,10 @@ const styles = StyleSheet.create({
     right: -8,
     backgroundColor: "white",
     borderRadius: 12,
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
   },
   chip: {
     paddingHorizontal: 14,

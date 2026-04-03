@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../../supabase";
 import { useSeller } from "../context/SellerContext";
 import { useToast } from "../context/ToastContext";
@@ -27,7 +28,7 @@ import { SellerChatScreen } from "./SellerChatScreen";
 export const SellerChatsScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const { horizontalPadding, isWide } = useResponsive();
-  const { chats, loading, refresh, sellerId, profile } = useSeller();
+  const { chats, loading, refreshData, sellerId, profile } = useSeller();
   const theme = profile?.theme_apply_store
     ? getTheme(profile?.theme_color || colors.primary)
     : getTheme(colors.primary);
@@ -39,17 +40,39 @@ export const SellerChatsScreen = ({ navigation }) => {
   const [activeTab, setActiveTab] = useState("messages");
   const [selectedChat, setSelectedChat] = useState(null);
 
-  useEffect(() => {
-    if (sellerId) {
-      fetchStatuses();
-    }
-  }, [sellerId]);
+  const getStatusStoragePath = useCallback((status) => {
+    const url = String(status?.media_url || "");
+    if (!url || !url.includes("/seller-statuses/")) return null;
 
-  useEffect(() => {
-    return () => {};
+    const [, rawPath = ""] = url.split("/seller-statuses/");
+    const path = rawPath.split("?")[0];
+    return path || null;
   }, []);
 
-  const fetchStatuses = async () => {
+  const removeStatusFilesFromStorage = useCallback(
+    async (statusList) => {
+      const paths = Array.from(
+        new Set(
+          (statusList || [])
+            .map((item) => getStatusStoragePath(item))
+            .filter(Boolean),
+        ),
+      );
+
+      if (!paths.length) return;
+
+      const { error } = await supabase.storage
+        .from("seller-statuses")
+        .remove(paths);
+
+      if (error) {
+        console.error("Error deleting expired status files:", error);
+      }
+    },
+    [getStatusStoragePath],
+  );
+
+  const fetchStatuses = useCallback(async () => {
     if (!sellerId) return;
     try {
       const { data, error } = await supabase
@@ -66,11 +89,99 @@ export const SellerChatsScreen = ({ navigation }) => {
     } catch (err) {
       console.error("Error fetching statuses:", err);
     }
-  };
+  }, [sellerId]);
+
+  const cleanupExpiredStatuses = useCallback(async () => {
+    if (!sellerId) return;
+
+    try {
+      const nowIso = new Date().toISOString();
+      const { data: expired, error } = await supabase
+        .from("express_seller_statuses")
+        .select("id,media_url")
+        .eq("seller_id", sellerId)
+        .lte("expires_at", nowIso);
+
+      if (error) throw error;
+      if (!expired?.length) return;
+
+      await removeStatusFilesFromStorage(expired);
+
+      const expiredIds = expired.map((item) => item.id).filter(Boolean);
+      if (expiredIds.length) {
+        const { error: deleteError } = await supabase
+          .from("express_seller_statuses")
+          .delete()
+          .in("id", expiredIds);
+
+        if (deleteError) {
+          console.error("Error deleting expired statuses:", deleteError);
+        }
+      }
+
+      setStatuses((prev) =>
+        (prev || []).filter((status) => !expiredIds.includes(status.id)),
+      );
+    } catch (err) {
+      console.error("Error cleaning expired statuses:", err);
+    }
+  }, [removeStatusFilesFromStorage, sellerId]);
+
+  useEffect(() => {
+    if (!sellerId) return;
+
+    fetchStatuses();
+    cleanupExpiredStatuses();
+
+    const statusChannel = supabase
+      .channel(`seller-statuses-${sellerId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "express_seller_statuses",
+          filter: `seller_id=eq.${sellerId}`,
+        },
+        () => {
+          fetchStatuses();
+          cleanupExpiredStatuses();
+        },
+      )
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          fetchStatuses();
+          cleanupExpiredStatuses();
+        }
+      });
+
+    const cleanupTimer = setInterval(() => {
+      cleanupExpiredStatuses();
+      fetchStatuses();
+    }, 60 * 1000);
+
+    return () => {
+      clearInterval(cleanupTimer);
+      statusChannel?.unsubscribe?.();
+    };
+  }, [cleanupExpiredStatuses, fetchStatuses, sellerId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!sellerId) return;
+      cleanupExpiredStatuses();
+      fetchStatuses();
+    }, [cleanupExpiredStatuses, fetchStatuses, sellerId]),
+  );
+
+  useEffect(() => {
+    return () => {};
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await refresh();
+    await refreshData();
+    await cleanupExpiredStatuses();
     await fetchStatuses();
     setRefreshing(false);
   };
@@ -97,16 +208,10 @@ export const SellerChatsScreen = ({ navigation }) => {
       if (error) throw error;
 
       // Delete from storage
-      if (status.media_url) {
-        const urlParts = status.media_url.split("/seller-statuses/");
-        if (urlParts.length > 1) {
-          const filePath = urlParts[1].split("?")[0];
-          await supabase.storage.from("seller-statuses").remove([filePath]);
-        }
-      }
+      await removeStatusFilesFromStorage([status]);
 
       // Update local state
-      setStatuses(statuses.filter((s) => s.id !== status.id));
+      setStatuses((prev) => (prev || []).filter((s) => s.id !== status.id));
       toast.success("Status deleted successfully");
     } catch (error) {
       console.error("Error deleting status:", error);
@@ -375,9 +480,12 @@ export const SellerChatsScreen = ({ navigation }) => {
                     })}
                   </Text>
                   <Text style={styles.statusExpiry}>
-                    {Math.round(
-                      (new Date(status.expires_at) - new Date()) /
-                        (1000 * 60 * 60),
+                    {Math.max(
+                      0,
+                      Math.round(
+                        (new Date(status.expires_at).getTime() - Date.now()) /
+                          (1000 * 60 * 60),
+                      ),
                     )}
                     h left
                   </Text>

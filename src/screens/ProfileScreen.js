@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
   Image,
+  ImageBackground,
   FlatList,
   RefreshControl,
   Modal,
@@ -43,6 +44,36 @@ const THEME_OPTIONS = Object.values(THEMES).map((t) => t.primary);
 // Supabase storage bucket for seller profile images
 const PROFILE_BUCKET = "profile";
 
+const resolveProfileImageUri = (rawValue) => {
+  const value = String(rawValue || "").trim();
+  if (!value) return "";
+
+  // Already a usable URI (remote or local preview)
+  if (/^https?:\/\//i.test(value) || value.startsWith("file://")) {
+    return value;
+  }
+
+  // Stored object path; convert to public URL from profile bucket
+  const normalizedPath = value.replace(/^\/+/, "");
+  const { data } = supabase.storage
+    .from(PROFILE_BUCKET)
+    .getPublicUrl(normalizedPath);
+  return data?.publicUrl || "";
+};
+
+const getProfileAvatarValue = (profile) => {
+  const candidates = [
+    profile?.avatar,
+    profile?.avatar_url,
+    profile?.profile_image,
+  ];
+  for (const candidate of candidates) {
+    const value = String(candidate || "").trim();
+    if (value) return value;
+  }
+  return "";
+};
+
 export const ProfileScreen = () => {
   const {
     profile,
@@ -50,11 +81,11 @@ export const ProfileScreen = () => {
     products,
     orders,
     metrics,
-    createSupportTicket,
     updateProfile,
     sellerId,
     needsSubaccount,
     createPaystackSubaccount,
+    createSupportTicket,
     deleteAccount,
   } = useSeller();
   const toast = useToast();
@@ -64,24 +95,27 @@ export const ProfileScreen = () => {
   const theme = profile?.theme_apply_store
     ? getTheme(profile?.theme_color || colors.primary)
     : getTheme(colors.primary);
+  const heroBackgroundUri = resolveProfileImageUri(
+    getProfileAvatarValue(profile),
+  );
+  const hasHeroBackgroundImage = Boolean(heroBackgroundUri);
   const [activeTab, setActiveTab] = useState("main");
-  const [subject, setSubject] = useState("");
-  const [message, setMessage] = useState("");
-  const [priority, setPriority] = useState("medium");
-  const [submitting, setSubmitting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [showLoadingPreview, setShowLoadingPreview] = useState(false);
   const [editName, setEditName] = useState(profile?.name || "");
   const [editEmail, setEditEmail] = useState(profile?.email || "");
   const [editPhone, setEditPhone] = useState(profile?.phone || "");
   const [editLocation, setEditLocation] = useState(profile?.location || "");
+  const [editStoreDescription, setEditStoreDescription] = useState(
+    profile?.store_description || "",
+  );
   const [editFulfillmentSpeed, setEditFulfillmentSpeed] = useState(
     profile?.fulfillment_speed || "",
   );
   const [editWeeklyTarget, setEditWeeklyTarget] = useState(
     profile?.weekly_target?.toString() || "",
   );
-  const [editAvatar, setEditAvatar] = useState(profile?.avatar || "");
+  const [editAvatar, setEditAvatar] = useState(getProfileAvatarValue(profile));
   const [editFacebook, setEditFacebook] = useState(
     profile?.social_facebook || "",
   );
@@ -202,6 +236,10 @@ Company: ExpressMart`;
   const [followers, setFollowers] = useState([]);
   const [followersLoading, setFollowersLoading] = useState(false);
   const [computedRating, setComputedRating] = useState(null);
+  const [supportSubject, setSupportSubject] = useState("");
+  const [supportMessage, setSupportMessage] = useState("");
+  const [supportPriority, setSupportPriority] = useState("medium");
+  const [supportSubmitting, setSupportSubmitting] = useState(false);
 
   const categoryCounts = useMemo(() => {
     const counts = {};
@@ -229,49 +267,20 @@ Company: ExpressMart`;
   // Jump to tab when navigated with initialTab param
   useEffect(() => {
     const tab = route.params?.initialTab;
-    if (tab) setActiveTab(tab);
-  }, [route.params?.initialTab]);
+    if (!tab) return;
 
-  // Quick actions for seller profile (rendered in main tab)
-  const quickActions = [
-    {
-      icon: "cube",
-      label: "Orders",
-      action: () => navigation.navigate("Orders"),
-      color: "#3B82F6",
-      bg: "#EFF6FF",
-    },
-    {
-      icon: "bag-check",
-      label: "Catalog",
-      action: () => navigation.navigate("Catalog"),
-      color: "#10B981",
-      bg: "#F0FDF4",
-    },
-    {
-      icon: "card",
-      label: "Payouts",
-      action: () => navigation.navigate("PaystackSetup"),
-      color: "#F59E0B",
-      bg: "#FFFBEB",
-    },
-    {
-      icon: "people",
-      label: "Followers",
-      action: () => setActiveTab("followers"),
-      color: "#A855F7",
-      bg: "#FAF5FF",
-    },
-  ];
+    setActiveTab(tab);
+  }, [route.params?.initialTab]);
 
   const startEditing = () => {
     setEditName(profile?.name || "");
     setEditEmail(profile?.email || "");
     setEditPhone(profile?.phone || "");
     setEditLocation(profile?.location || "");
+    setEditStoreDescription(profile?.store_description || "");
     setEditFulfillmentSpeed(profile?.fulfillment_speed || "");
     setEditWeeklyTarget(profile?.weekly_target?.toString() || "");
-    setEditAvatar(profile?.avatar || "");
+    setEditAvatar(getProfileAvatarValue(profile));
     setEditFacebook(profile?.social_facebook || "");
     setEditInstagram(profile?.social_instagram || "");
     setEditTwitter(profile?.social_twitter || "");
@@ -312,6 +321,11 @@ Company: ExpressMart`;
       items: [
         { icon: "person-outline", label: "Edit Profile", action: startEditing },
         {
+          icon: "people-outline",
+          label: "Followers",
+          action: () => setActiveTab("followers"),
+        },
+        {
           icon: "notifications-outline",
           label: "Notifications",
           action: () => {
@@ -325,10 +339,10 @@ Company: ExpressMart`;
       ],
     },
     {
-      title: "Support",
+      title: "Legal",
       items: [
         {
-          icon: "chatbubble-ellipses-outline",
+          icon: "help-circle-outline",
           label: "Support",
           action: () => setActiveTab("support"),
         },
@@ -432,9 +446,10 @@ Company: ExpressMart`;
       setEditEmail(profile?.email || "");
       setEditPhone(profile?.phone || "");
       setEditLocation(profile?.location || "");
+      setEditStoreDescription(profile?.store_description || "");
       setEditFulfillmentSpeed(profile?.fulfillment_speed || "");
       setEditWeeklyTarget(profile?.weekly_target?.toString() || "");
-      setEditAvatar(profile?.avatar || "");
+      setEditAvatar(getProfileAvatarValue(profile));
       setEditFacebook(profile?.social_facebook || "");
       setEditInstagram(profile?.social_instagram || "");
       setEditTwitter(profile?.social_twitter || "");
@@ -835,7 +850,7 @@ Company: ExpressMart`;
       let avatarUrl = editAvatar;
       if (
         editAvatar &&
-        editAvatar !== profile?.avatar &&
+        editAvatar !== getProfileAvatarValue(profile) &&
         !editAvatar.startsWith("http")
       ) {
         avatarUrl = await uploadImage(editAvatar);
@@ -845,6 +860,7 @@ Company: ExpressMart`;
         // email is intentionally not updatable from the seller app
         phone: editPhone,
         location: editLocation,
+        store_description: editStoreDescription.trim() || null,
         fulfillment_speed: editFulfillmentSpeed,
         weekly_target: editWeeklyTarget ? parseFloat(editWeeklyTarget) : null,
         avatar: avatarUrl,
@@ -867,102 +883,113 @@ Company: ExpressMart`;
       setSaving(false);
     }
   };
-  const submitTicket = async () => {
-    if (!subject || !message) return;
-    setSubmitting(true);
-    await createSupportTicket({ subject, message, priority });
-    setSubject("");
-    setMessage("");
-    setPriority("medium");
-    setSubmitting(false);
-  };
 
+  const submitSupport = async () => {
+    if (!supportSubject.trim() || !supportMessage.trim()) {
+      toast.error("Add a subject and message");
+      return;
+    }
+
+    try {
+      setSupportSubmitting(true);
+      await createSupportTicket({
+        subject: supportSubject.trim(),
+        message: supportMessage.trim(),
+        priority: supportPriority,
+      });
+      setSupportSubject("");
+      setSupportMessage("");
+      setSupportPriority("medium");
+      toast.success("Support request sent");
+    } catch (error) {
+      toast.error("Failed to send support request");
+    } finally {
+      setSupportSubmitting(false);
+    }
+  };
   return (
     <ResponsiveContainer>
       <View style={styles.container}>
         {/* Tabs */}
-        <View style={styles.tabBar}>
+        <View style={styles.profileTabBar}>
           <Pressable
             style={[
-              styles.tab,
-              activeTab === "main" && { borderBottomColor: theme.primary },
+              styles.profileTabItem,
+              activeTab === "main" && {
+                backgroundColor: `${theme.primary}15`,
+              },
             ]}
             onPress={() => setActiveTab("main")}
           >
             <Ionicons
               name="person"
-              size={20}
+              size={18}
               color={activeTab === "main" ? theme.primary : colors.muted}
             />
             <Text
               style={[
-                styles.tabText,
+                styles.profileTabText,
                 activeTab === "main" && { color: theme.primary },
               ]}
             >
               Main
             </Text>
           </Pressable>
+
           <Pressable
             style={[
-              styles.tab,
-              activeTab === "followers" && { borderBottomColor: theme.primary },
+              styles.profileTabItem,
+              activeTab === "followers" && {
+                backgroundColor: `${theme.primary}15`,
+              },
             ]}
             onPress={() => setActiveTab("followers")}
           >
             <Ionicons
               name="people"
-              size={20}
+              size={18}
               color={activeTab === "followers" ? theme.primary : colors.muted}
             />
             <Text
               style={[
-                styles.tabText,
+                styles.profileTabText,
                 activeTab === "followers" && { color: theme.primary },
               ]}
             >
               Followers
             </Text>
+            {followers.length > 0 && (
+              <View
+                style={[
+                  styles.profileTabBadge,
+                  { backgroundColor: theme.primary },
+                ]}
+              >
+                <Text style={styles.profileTabBadgeText}>
+                  {followers.length}
+                </Text>
+              </View>
+            )}
           </Pressable>
-          <Pressable
-            style={[
-              styles.tab,
-              activeTab === "support" && { borderBottomColor: theme.primary },
-            ]}
-            onPress={() => setActiveTab("support")}
-          >
-            <Ionicons
-              name="help-circle"
-              size={20}
-              color={activeTab === "support" ? theme.primary : colors.muted}
-            />
-            <Text
-              style={[
-                styles.tabText,
-                activeTab === "support" && { color: theme.primary },
-              ]}
-            >
-              Support
-            </Text>
-          </Pressable>
+
           {!isWide && (
             <Pressable
               style={[
-                styles.tab,
+                styles.profileTabItem,
                 activeTab === "feedback" && {
-                  borderBottomColor: theme.primary,
+                  backgroundColor: `${theme.primary}15`,
                 },
               ]}
               onPress={() => setActiveTab("feedback")}
             >
               <Ionicons
                 name="star"
-                size={20}
+                size={18}
                 color={activeTab === "feedback" ? theme.primary : colors.muted}
               />
               <Text
                 style={[
-                  styles.tabText,
+                  styles.profileTabText,
                   activeTab === "feedback" && { color: theme.primary },
                 ]}
               >
@@ -986,161 +1013,151 @@ Company: ExpressMart`;
               <>
                 {/* Profile hero */}
                 <View style={[styles.heroCard]}>
-                  <LinearGradient
-                    colors={[theme.primary, theme.primary + "cc"]}
-                    style={styles.heroGradient}
+                  <ImageBackground
+                    source={
+                      hasHeroBackgroundImage ? { uri: heroBackgroundUri } : null
+                    }
+                    style={[
+                      styles.heroGradient,
+                      !hasHeroBackgroundImage && {
+                        backgroundColor: theme.primary,
+                      },
+                    ]}
+                    imageStyle={styles.heroBackgroundImage}
                   >
-                    <View style={styles.heroRow}>
-                      <View style={styles.heroLeft}>
-                        <Pressable
-                          onPress={startEditing}
-                          style={styles.heroAvatar}
-                        >
-                          {profile?.avatar ? (
-                            <Image
-                              source={{ uri: profile.avatar }}
-                              style={styles.heroAvatar}
-                            />
-                          ) : (
-                            <View style={styles.heroAvatar}>
-                              <Ionicons
-                                name="person"
-                                size={40}
-                                color={colors.muted}
-                              />
+                    <LinearGradient
+                      colors={[
+                        "rgba(12,18,30,0.72)",
+                        "rgba(14,26,43,0.6)",
+                        "rgba(14,26,43,0.72)",
+                      ]}
+                      style={styles.heroOverlay}
+                    >
+                      <View style={styles.heroRow}>
+                        <View style={styles.heroRight}>
+                          <View style={styles.heroTopActions}>
+                            <Pressable
+                              style={styles.heroEditButton}
+                              onPress={startEditing}
+                            >
+                              <Ionicons name="pencil" size={14} color="#fff" />
+                              <Text style={styles.heroEditButtonText}>
+                                Edit
+                              </Text>
+                            </Pressable>
+                          </View>
+                          <Text style={styles.heroTitle}>
+                            {profile?.name || "Seller"}
+                          </Text>
+                          <Text style={styles.heroSubtitle}>
+                            {profile?.location || ""}
+                          </Text>
+                          {!!profile?.badges?.length && (
+                            <View style={styles.heroBadgeRow}>
+                              {profile.badges.slice(0, 4).map((badgeId) => {
+                                const badge = BADGE_CONFIG[badgeId];
+                                if (!badge) return null;
+                                return (
+                                  <View
+                                    key={badgeId}
+                                    style={[
+                                      styles.heroBadgeChip,
+                                      { backgroundColor: `${badge.color}33` },
+                                    ]}
+                                  >
+                                    <Ionicons
+                                      name={badge.icon}
+                                      size={12}
+                                      color="#fff"
+                                    />
+                                    <Text style={styles.heroBadgeChipText}>
+                                      {badge.label}
+                                    </Text>
+                                  </View>
+                                );
+                              })}
                             </View>
                           )}
-                          <Pressable
-                            style={styles.heroEditButton}
-                            onPress={startEditing}
-                          >
-                            <Ionicons name="pencil" size={14} color="#fff" />
-                          </Pressable>
-                        </Pressable>
-                      </View>
-                      <View style={styles.heroRight}>
-                        <Text style={styles.heroTitle}>
-                          {profile?.name || "Seller"}
-                        </Text>
-                        <Text style={styles.heroSubtitle}>
-                          {profile?.location || ""}
-                        </Text>
-                        {/* Social links row */}
-                        {(() => {
-                          const socialConfigs = [
-                            {
-                              key: "social_facebook",
-                              icon: "logo-facebook",
-                              type: "facebook",
-                              domain: "facebook.com",
-                            },
-                            {
-                              key: "social_instagram",
-                              icon: "logo-instagram",
-                              type: "instagram",
-                              domain: "instagram.com",
-                            },
-                            {
-                              key: "social_twitter",
-                              icon: "logo-twitter",
-                              type: "twitter",
-                              domain: "twitter.com",
-                            },
-                            {
-                              key: "social_whatsapp",
-                              icon: "logo-whatsapp",
-                              type: "whatsapp",
-                            },
-                            {
-                              key: "social_website",
-                              icon: "globe-outline",
-                              type: "website",
-                            },
-                          ];
-                          const links = socialConfigs
-                            .map((c) => ({ ...c, value: profile?.[c.key] }))
-                            .filter((s) => s.value && String(s.value).trim());
+                          {/* Social links row */}
+                          {(() => {
+                            const socialConfigs = [
+                              {
+                                key: "social_facebook",
+                                icon: "logo-facebook",
+                                type: "facebook",
+                                domain: "facebook.com",
+                              },
+                              {
+                                key: "social_instagram",
+                                icon: "logo-instagram",
+                                type: "instagram",
+                                domain: "instagram.com",
+                              },
+                              {
+                                key: "social_twitter",
+                                icon: "logo-twitter",
+                                type: "twitter",
+                                domain: "twitter.com",
+                              },
+                              {
+                                key: "social_whatsapp",
+                                icon: "logo-whatsapp",
+                                type: "whatsapp",
+                              },
+                              {
+                                key: "social_website",
+                                icon: "globe-outline",
+                                type: "website",
+                              },
+                            ];
+                            const links = socialConfigs
+                              .map((c) => ({ ...c, value: profile?.[c.key] }))
+                              .filter((s) => s.value && String(s.value).trim());
 
-                          if (links.length === 0) return null;
-                          return (
-                            <View style={styles.heroSocialRow}>
-                              {links.map((s) => (
-                                <Pressable
-                                  key={s.key}
-                                  style={styles.socialIcon}
-                                  onPress={() => openSocialLink(s)}
-                                >
-                                  <Ionicons
-                                    name={s.icon}
-                                    size={16}
-                                    color="#fff"
-                                  />
-                                </Pressable>
-                              ))}
+                            if (links.length === 0) return null;
+                            return (
+                              <View style={styles.heroSocialRow}>
+                                {links.map((s) => (
+                                  <Pressable
+                                    key={s.key}
+                                    style={styles.socialIcon}
+                                    onPress={() => openSocialLink(s)}
+                                  >
+                                    <Ionicons
+                                      name={s.icon}
+                                      size={16}
+                                      color="#fff"
+                                    />
+                                  </Pressable>
+                                ))}
+                              </View>
+                            );
+                          })()}
+                          <View style={styles.heroMetricsRow}>
+                            <View style={styles.statBox}>
+                              <Text style={styles.statLabel}>Orders</Text>
+                              <Text style={styles.statValue}>
+                                {orders?.length || 0}
+                              </Text>
                             </View>
-                          );
-                        })()}
-                        <View style={styles.heroMetricsRow}>
-                          <View style={styles.statBox}>
-                            <Text style={styles.statLabel}>Orders</Text>
-                            <Text style={styles.statValue}>
-                              {orders?.length || 0}
-                            </Text>
-                          </View>
-                          <View style={styles.statBox}>
-                            <Text style={styles.statLabel}>Followers</Text>
-                            <Text style={styles.statValue}>
-                              {followers.length}
-                            </Text>
-                          </View>
-                          <View style={styles.statBox}>
-                            <Text style={styles.statLabel}>Products</Text>
-                            <Text style={styles.statValue}>
-                              {products?.filter((p) => p.status === "active")
-                                .length || 0}
-                            </Text>
+                            <View style={styles.statBox}>
+                              <Text style={styles.statLabel}>Followers</Text>
+                              <Text style={styles.statValue}>
+                                {followers.length}
+                              </Text>
+                            </View>
+                            <View style={styles.statBox}>
+                              <Text style={styles.statLabel}>Products</Text>
+                              <Text style={styles.statValue}>
+                                {products?.filter((p) => p.status === "active")
+                                  .length || 0}
+                              </Text>
+                            </View>
                           </View>
                         </View>
                       </View>
-                    </View>
-                  </LinearGradient>
-                </View>
-                {/* Seller Badges */}
-                <View style={[styles.card, { marginTop: 12 }]}>
-                  <Text style={styles.section}>Seller Badges</Text>
-                  {!profile?.badges || profile.badges.length === 0 ? (
-                    <Text style={styles.subtitle}>No badges yet</Text>
-                  ) : (
-                    <View style={styles.badgesGrid}>
-                      {profile.badges.map((badgeId) => {
-                        const badge = BADGE_CONFIG[badgeId];
-                        if (!badge) return null;
-                        return (
-                          <View
-                            key={badgeId}
-                            style={[
-                              styles.badgeItemLarge,
-                              { backgroundColor: badge.color + "20" },
-                            ]}
-                          >
-                            <Ionicons
-                              name={badge.icon}
-                              size={16}
-                              color={badge.color}
-                            />
-                            <Text
-                              style={[
-                                styles.badgeItemText,
-                                { color: badge.color },
-                              ]}
-                            >
-                              {badge.label}
-                            </Text>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  )}
+                    </LinearGradient>
+                  </ImageBackground>
                 </View>
 
                 {/* Paystack / Payout card */}
@@ -1390,19 +1407,35 @@ Company: ExpressMart`;
                   onRequestClose={() => setPaymentEditVisible(false)}
                 >
                   <ScrollView
-                    contentContainerStyle={{ padding: 16, paddingTop: 60 }}
+                    contentContainerStyle={styles.editPageContainer}
+                    showsVerticalScrollIndicator={false}
                   >
+                    <View style={styles.editHeroWrap}>
+                      <LinearGradient
+                        colors={["#0F172A", "#1E293B"]}
+                        style={styles.editHeroGradient}
+                      >
+                        <Pressable
+                          onPress={() => setPaymentEditVisible(false)}
+                          style={styles.editHeroCloseButton}
+                        >
+                          <Ionicons name="close" size={18} color="#fff" />
+                        </Pressable>
+                        <Text style={styles.editHeroTitle}>
+                          {needsSubaccount
+                            ? "Add Payment Details"
+                            : "Edit Payment Details"}
+                        </Text>
+                        <Text style={styles.editHeroSubtitle}>
+                          {needsSubaccount
+                            ? "Set up payout details to start receiving funds."
+                            : "Update payout destination for your Paystack account."}
+                        </Text>
+                      </LinearGradient>
+                    </View>
+
                     <View style={styles.card}>
-                      <Text style={styles.section}>
-                        {needsSubaccount
-                          ? "Add Bank Details"
-                          : "Edit Payment Details"}
-                      </Text>
-                      <Text style={styles.paymentHintText}>
-                        {needsSubaccount
-                          ? "Add your payout details to receive payments."
-                          : "Update your payout details. This updates both your saved payment profile and Paystack subaccount."}
-                      </Text>
+                      <Text style={styles.section}>Payout Setup</Text>
 
                       {paymentLoadError ? (
                         <Text style={styles.paymentErrorText}>
@@ -1466,8 +1499,16 @@ Company: ExpressMart`;
                             </Pressable>
                           </View>
 
-                          <Text style={styles.label}>Currency</Text>
-                          <Text style={styles.paymentHintText}>GHS only</Text>
+                          <View style={styles.editInfoPill}>
+                            <Ionicons
+                              name="wallet-outline"
+                              size={14}
+                              color={colors.muted}
+                            />
+                            <Text style={styles.editInfoPillText}>
+                              Currency: GHS
+                            </Text>
+                          </View>
 
                           {paymentType === "bank" ? (
                             <>
@@ -1544,14 +1585,7 @@ Company: ExpressMart`;
                         </>
                       )}
 
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          justifyContent: "flex-end",
-                          gap: 12,
-                          marginTop: 12,
-                        }}
-                      >
+                      <View style={styles.editActionsRow}>
                         <Pressable
                           onPress={() => setPaymentEditVisible(false)}
                           style={styles.cancelButton}
@@ -1774,21 +1808,36 @@ Company: ExpressMart`;
             {/* Followers Tab */}
             {activeTab === "followers" && (
               <View style={styles.tabContent}>
-                <View style={styles.card}>
-                  <View style={styles.followersHeader}>
-                    <Text style={styles.section}>Your Followers</Text>
+                <LinearGradient
+                  colors={["#F7FAFF", "#FFFFFF"]}
+                  style={styles.followersHero}
+                >
+                  <View style={styles.followersHeaderRow}>
+                    <View>
+                      <Text style={styles.followersHeroTitle}>Followers</Text>
+                      <Text style={styles.followersHeroSubtitle}>
+                        Customers following your store
+                      </Text>
+                    </View>
                     <View
                       style={[
                         styles.followerCountBadge,
-                        { backgroundColor: theme.primary + "20" },
+                        { backgroundColor: `${theme.primary}1F` },
                       ]}
                     >
-                      <Text style={styles.followerCountText}>
+                      <Text
+                        style={[
+                          styles.followerCountText,
+                          { color: theme.primary },
+                        ]}
+                      >
                         {followers.length}
                       </Text>
                     </View>
                   </View>
+                </LinearGradient>
 
+                <View style={styles.card}>
                   {followersLoading ? (
                     <View style={styles.loadingContainer}>
                       <ActivityIndicator size="large" color={theme.primary} />
@@ -1800,20 +1849,24 @@ Company: ExpressMart`;
                     <View style={styles.emptyFollowers}>
                       <Ionicons
                         name="people-outline"
-                        size={64}
+                        size={48}
                         color={colors.muted}
                       />
                       <Text style={styles.emptyFollowersTitle}>
                         No followers yet
                       </Text>
                       <Text style={styles.emptyFollowersText}>
-                        When customers follow your store, they'll appear here.
+                        Your followers will appear here as customers follow your
+                        store.
                       </Text>
                     </View>
                   ) : (
                     <View style={styles.followersList}>
                       {followers.map((follow) => (
-                        <View key={follow.id} style={styles.followerItem}>
+                        <View
+                          key={follow.id}
+                          style={styles.followerItemRedesign}
+                        >
                           <View style={styles.followerAvatar}>
                             {follow.user?.avatar_url ? (
                               <Image
@@ -1823,7 +1876,7 @@ Company: ExpressMart`;
                             ) : (
                               <Ionicons
                                 name="person"
-                                size={24}
+                                size={22}
                                 color={theme.primary}
                               />
                             )}
@@ -1837,6 +1890,11 @@ Company: ExpressMart`;
                               {new Date(follow.created_at).toLocaleDateString()}
                             </Text>
                           </View>
+                          <Ionicons
+                            name="chevron-forward"
+                            size={16}
+                            color={colors.muted}
+                          />
                         </View>
                       ))}
                     </View>
@@ -1845,68 +1903,79 @@ Company: ExpressMart`;
               </View>
             )}
 
-            {/* Support Tab */}
             {activeTab === "support" && (
               <View style={styles.tabContent}>
                 <View style={styles.card}>
-                  <Text style={styles.section}>Need support?</Text>
-                  <Text style={styles.subtitle}>
-                    Create a ticket and our admin team will respond quickly.
+                  <Text style={styles.section}>Support</Text>
+                  <Text style={styles.supportHint}>
+                    Need help with orders, payouts, or your account? Send a
+                    support request.
                   </Text>
+
                   <Text style={styles.label}>Subject</Text>
                   <TextInput
                     style={styles.input}
-                    value={subject}
-                    onChangeText={setSubject}
-                    placeholder="e.g. Featured placement"
-                  />
-                  <Text style={styles.label}>Message</Text>
-                  <TextInput
-                    style={[styles.input, { height: 120 }]}
-                    multiline
-                    value={message}
-                    onChangeText={setMessage}
-                    placeholder="Share details..."
+                    value={supportSubject}
+                    onChangeText={setSupportSubject}
+                    placeholder="What do you need help with?"
                   />
 
-                  <View style={styles.priorityRow}>
+                  <Text style={styles.label}>Priority</Text>
+                  <View style={styles.supportPriorityRow}>
                     {[
                       { key: "low", label: "Low" },
                       { key: "medium", label: "Medium" },
                       { key: "high", label: "High" },
-                    ].map(({ key, label }) => (
+                    ].map((p) => (
                       <Pressable
-                        key={key}
+                        key={p.key}
                         style={[
-                          styles.priorityChip,
-                          priority === key && styles.priorityChipActive,
+                          styles.supportPriorityChip,
+                          supportPriority === p.key && {
+                            borderColor: theme.primary,
+                            backgroundColor: `${theme.primary}14`,
+                          },
                         ]}
-                        onPress={() => setPriority(key)}
+                        onPress={() => setSupportPriority(p.key)}
                       >
                         <Text
                           style={[
-                            styles.priorityText,
-                            priority === key && styles.priorityTextActive,
+                            styles.supportPriorityChipText,
+                            supportPriority === p.key && {
+                              color: theme.primary,
+                            },
                           ]}
                         >
-                          {label}
+                          {p.label}
                         </Text>
                       </Pressable>
                     ))}
                   </View>
 
+                  <Text style={styles.label}>Message</Text>
+                  <TextInput
+                    style={[styles.input, styles.supportMessageInput]}
+                    value={supportMessage}
+                    onChangeText={setSupportMessage}
+                    placeholder="Describe the issue in detail"
+                    multiline
+                    textAlignVertical="top"
+                  />
+
                   <Pressable
+                    onPress={submitSupport}
                     style={[
-                      styles.primaryButton,
+                      styles.saveButton,
                       { backgroundColor: theme.primary },
                     ]}
-                    onPress={submitTicket}
-                    disabled={submitting || !subject || !message}
+                    disabled={supportSubmitting}
                   >
-                    {submitting ? (
+                    {supportSubmitting ? (
                       <ActivityIndicator color="#fff" />
                     ) : (
-                      <Text style={styles.primaryButtonText}>Send ticket</Text>
+                      <Text style={{ color: "#fff", fontWeight: "800" }}>
+                        Send Request
+                      </Text>
                     )}
                   </Pressable>
                 </View>
@@ -1922,12 +1991,69 @@ Company: ExpressMart`;
           transparent={false}
           onRequestClose={() => setPrivacyVisible(false)}
         >
-          <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 60 }}>
+          <ScrollView
+            contentContainerStyle={styles.editPageContainer}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.editHeroWrap}>
+              <LinearGradient
+                colors={["#111827", "#1F2937"]}
+                style={styles.editHeroGradient}
+              >
+                <Pressable
+                  onPress={() => setPrivacyVisible(false)}
+                  style={styles.editHeroCloseButton}
+                >
+                  <Ionicons name="close" size={18} color="#fff" />
+                </Pressable>
+                <Text style={styles.editHeroTitle}>Terms & Policies</Text>
+                <Text style={styles.editHeroSubtitle}>
+                  Read our privacy and data handling policy for seller accounts.
+                </Text>
+              </LinearGradient>
+            </View>
+
             <View style={styles.card}>
-              <Text style={styles.section}>Privacy Policy</Text>
-              <Text style={{ color: colors.muted, marginBottom: 12 }}>
-                {PRIVACY_POLICY_TEXT}
-              </Text>
+              <View style={styles.legalMetaRow}>
+                <View style={styles.legalMetaChip}>
+                  <Ionicons
+                    name="calendar-outline"
+                    size={14}
+                    color={colors.muted}
+                  />
+                  <Text style={styles.legalMetaText}>
+                    Updated: March 1, 2026
+                  </Text>
+                </View>
+                <View style={styles.legalMetaChip}>
+                  <Ionicons
+                    name="shield-checkmark-outline"
+                    size={14}
+                    color={colors.muted}
+                  />
+                  <Text style={styles.legalMetaText}>ExpressMart Policy</Text>
+                </View>
+              </View>
+
+              <View style={styles.legalBodyCard}>
+                <Text style={styles.legalBodyText}>{PRIVACY_POLICY_TEXT}</Text>
+              </View>
+
+              <View style={styles.legalHelpCard}>
+                <Ionicons
+                  name="mail-unread-outline"
+                  size={18}
+                  color={theme.primary}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.legalHelpTitle}>Need clarification?</Text>
+                  <Text style={styles.legalHelpText}>
+                    Contact support at expressmart233@gmail.com for policy
+                    questions.
+                  </Text>
+                </View>
+              </View>
+
               <Pressable
                 style={[styles.saveButton, { marginTop: 12 }]}
                 onPress={() => setPrivacyVisible(false)}
@@ -1953,39 +2079,54 @@ Company: ExpressMart`;
           onRequestClose={() => setEditing(false)}
         >
           <ScrollView
-            contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+            contentContainerStyle={styles.editPageContainer}
+            showsVerticalScrollIndicator={false}
           >
-            <View style={styles.card}>
-              <View style={styles.header}>
-                <View style={styles.avatarEdit}>
-                  <Pressable onPress={pickImage} style={styles.avatarContainer}>
-                    {editAvatar ? (
-                      <Image
-                        source={{ uri: editAvatar }}
-                        style={styles.avatar}
-                      />
-                    ) : (
-                      <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                        <Ionicons
-                          name="person"
-                          size={40}
-                          color={colors.muted}
-                        />
-                      </View>
-                    )}
-                    <View
-                      style={[
-                        styles.cameraIcon,
-                        { backgroundColor: theme.primary },
-                      ]}
-                    >
-                      <Ionicons name="camera" size={16} color="#fff" />
-                    </View>
+            <View style={styles.editHeroWrap}>
+              <ImageBackground
+                source={editAvatar ? { uri: editAvatar } : undefined}
+                style={styles.editHeroImage}
+                imageStyle={styles.editHeroImageInner}
+              >
+                <LinearGradient
+                  colors={["rgba(15,23,42,0.68)", "rgba(15,23,42,0.82)"]}
+                  style={styles.editHeroGradient}
+                >
+                  <Pressable
+                    onPress={() => setEditing(false)}
+                    style={styles.editHeroCloseButton}
+                  >
+                    <Ionicons name="close" size={18} color="#fff" />
                   </Pressable>
-                </View>
+                  <Text style={styles.editHeroTitle}>Edit Profile</Text>
+                  <Text style={styles.editHeroSubtitle}>
+                    Update your public seller identity and store details.
+                  </Text>
+                </LinearGradient>
+              </ImageBackground>
+            </View>
+
+            <View style={styles.card}>
+              <View style={styles.editMediaRow}>
+                <Pressable onPress={pickImage} style={styles.editPhotoButton}>
+                  <Ionicons
+                    name="image-outline"
+                    size={18}
+                    color={theme.primary}
+                  />
+                  <Text
+                    style={[
+                      styles.editPhotoButtonText,
+                      { color: theme.primary },
+                    ]}
+                  >
+                    Change Cover Image
+                  </Text>
+                </Pressable>
               </View>
 
               <View style={styles.editForm}>
+                <Text style={styles.editSectionCaption}>Business details</Text>
                 <Text style={styles.label}>Store Name</Text>
                 <TextInput
                   style={styles.input}
@@ -2016,6 +2157,17 @@ Company: ExpressMart`;
                   onChangeText={setEditLocation}
                   placeholder="Store location"
                 />
+                <Text style={styles.label}>Store Description</Text>
+                <TextInput
+                  style={[styles.input, styles.textAreaInput]}
+                  value={editStoreDescription}
+                  onChangeText={setEditStoreDescription}
+                  placeholder="Tell customers what your store is about"
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                  maxLength={600}
+                />
                 <Text style={styles.label}>Fulfillment Speed</Text>
                 <TextInput
                   style={styles.input}
@@ -2032,7 +2184,7 @@ Company: ExpressMart`;
                   keyboardType="numeric"
                 />
 
-                <Text style={styles.sectionTitle}>Social Media Links</Text>
+                <Text style={styles.editSectionCaption}>Social links</Text>
                 <Text style={styles.label}>Facebook</Text>
                 <TextInput
                   style={styles.input}
@@ -2179,14 +2331,7 @@ Company: ExpressMart`;
                   </View>
                 </View>
 
-                <View
-                  style={{
-                    flexDirection: "row",
-                    justifyContent: "flex-end",
-                    gap: 12,
-                    marginTop: 16,
-                  }}
-                >
+                <View style={styles.editActionsRow}>
                   <Pressable
                     onPress={() => setEditing(false)}
                     style={styles.cancelButton}
@@ -2245,6 +2390,162 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  editPageContainer: {
+    padding: 16,
+    paddingBottom: 120,
+    paddingTop: 56,
+  },
+  editHeroWrap: {
+    borderRadius: 22,
+    overflow: "hidden",
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  editHeroImage: {
+    minHeight: 164,
+  },
+  editHeroImageInner: {
+    resizeMode: "cover",
+  },
+  editHeroGradient: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    minHeight: 164,
+    justifyContent: "flex-end",
+  },
+  editHeroCloseButton: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.24)",
+  },
+  editHeroTitle: {
+    color: "#fff",
+    fontSize: 24,
+    fontWeight: "800",
+  },
+  editHeroSubtitle: {
+    color: "rgba(255,255,255,0.88)",
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  editMediaRow: {
+    alignItems: "flex-start",
+  },
+  editPhotoButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+    backgroundColor: "#EFF6FF",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  editPhotoButtonText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  editSectionCaption: {
+    fontSize: 12,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    color: "#64748B",
+    marginTop: 2,
+    marginBottom: 2,
+    fontWeight: "800",
+  },
+  editActionsRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 12,
+    marginTop: 16,
+  },
+  editInfoPill: {
+    marginTop: 12,
+    marginBottom: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  editInfoPillText: {
+    color: colors.muted,
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  legalMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 12,
+  },
+  legalMetaChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  legalMetaText: {
+    color: colors.muted,
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  legalBodyCard: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 14,
+    padding: 14,
+    backgroundColor: "#FCFCFD",
+  },
+  legalBodyText: {
+    color: colors.muted,
+    lineHeight: 20,
+    fontSize: 13,
+  },
+  legalHelpCard: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: "#EEF2FF",
+    borderWidth: 1,
+    borderColor: "#DDE3FF",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  legalHelpTitle: {
+    color: colors.dark,
+    fontWeight: "800",
+    fontSize: 13,
+  },
+  legalHelpText: {
+    color: colors.muted,
+    marginTop: 4,
+    lineHeight: 18,
+    fontSize: 12,
+  },
   tabBar: {
     flexDirection: "row",
     backgroundColor: "#fff",
@@ -2276,6 +2577,40 @@ const styles = StyleSheet.create({
   },
   tabContent: {
     padding: 16,
+  },
+  profileTabBar: {
+    flexDirection: "row",
+    marginTop: 50,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    gap: 8,
+  },
+  profileTabItem: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: colors.light,
+  },
+  profileTabText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.muted,
+  },
+  profileTabBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    minWidth: 20,
+    alignItems: "center",
+  },
+  profileTabBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "700",
   },
   card: {
     backgroundColor: "#fff",
@@ -2402,33 +2737,38 @@ const styles = StyleSheet.create({
   heroGradient: {
     padding: 18,
   },
+  heroBackgroundImage: {
+    resizeMode: "cover",
+  },
+  heroOverlay: {
+    padding: 18,
+  },
   heroRow: {
     flexDirection: "row",
-    alignItems: "center",
-  },
-  heroLeft: {
-    marginRight: 16,
-    position: "relative",
-  },
-  heroAvatar: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    overflow: "hidden",
-    backgroundColor: colors.surface,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: "flex-start",
   },
   heroEditButton: {
-    position: "absolute",
-    right: -6,
-    bottom: -6,
-    backgroundColor: "#0006",
-    padding: 8,
-    borderRadius: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(0,0,0,0.42)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.28)",
+  },
+  heroEditButtonText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
   },
   heroRight: {
     flex: 1,
+  },
+  heroTopActions: {
+    alignItems: "flex-end",
+    marginBottom: 8,
   },
   heroTitle: {
     color: "#fff",
@@ -2438,6 +2778,27 @@ const styles = StyleSheet.create({
   heroSubtitle: {
     color: "#fff",
     marginTop: 6,
+  },
+  heroBadgeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 10,
+  },
+  heroBadgeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+  },
+  heroBadgeChipText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
   },
   badgeContainerSmall: {
     flexDirection: "row",
@@ -2895,6 +3256,9 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: "#fff",
   },
+  textAreaInput: {
+    minHeight: 110,
+  },
   priorityRow: {
     flexDirection: "row",
     gap: 10,
@@ -2937,6 +3301,28 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   // Followers styles
+  followersHero: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E6EDF8",
+    padding: 16,
+    marginBottom: 12,
+  },
+  followersHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  followersHeroTitle: {
+    fontSize: 19,
+    fontWeight: "800",
+    color: colors.dark,
+  },
+  followersHeroSubtitle: {
+    color: colors.muted,
+    marginTop: 4,
+    fontSize: 13,
+  },
   followersHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -2991,6 +3377,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     gap: 12,
   },
+  followerItemRedesign: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8FAFD",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E8EEF7",
+    gap: 12,
+  },
   followerAvatar: {
     width: 48,
     height: 48,
@@ -3016,6 +3413,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.muted,
     marginTop: 2,
+  },
+  supportHint: {
+    color: colors.muted,
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  supportPriorityRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 8,
+  },
+  supportPriorityChip: {
+    borderWidth: 1,
+    borderColor: "#D8DDE8",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  supportPriorityChipText: {
+    color: colors.dark,
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  supportMessageInput: {
+    minHeight: 120,
+    marginBottom: 12,
   },
   // Version section
   versionSection: {
