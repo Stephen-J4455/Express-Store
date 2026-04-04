@@ -7,7 +7,6 @@
     "icon": "./assets/express.png",
     "userInterfaceStyle": "light",
     "scheme": "expressstore",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/express.png",
       "resizeMode": "contain",
@@ -26,7 +25,6 @@
         "foregroundImage": "./assets/express.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true,
       "package": "com.stephenj3.expressstore",
       "googleServicesFile": "./google-services.json",
       "permissions": [
