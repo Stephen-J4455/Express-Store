@@ -60,6 +60,12 @@ const hasSellerRole = (user) => {
   return appRoles.includes("seller");
 };
 
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isUuid = (value) =>
+  typeof value === "string" && UUID_REGEX.test(value.trim());
+
 export const SellerProvider = ({ children }) => {
   // Seed with defaults so UI always has something to show
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
@@ -1062,7 +1068,10 @@ export const SellerProvider = ({ children }) => {
         throw new Error("Price must be numeric");
       }
 
-      const categoryObj = categories.find((c) => c.name === category);
+      const categoryObj = categories.find(
+        (c) => c.name === category || c.id === category,
+      );
+      const safeCategoryId = isUuid(categoryObj?.id) ? categoryObj.id : null;
 
       const payload = {
         seller_id: ensuredSellerId,
@@ -1071,7 +1080,7 @@ export const SellerProvider = ({ children }) => {
         price: numericPrice,
         shipping_fee: Number(shipping_fee) || 0,
         category,
-        category_id: categoryObj?.id || null,
+        category_id: safeCategoryId,
         thumbnail: thumbnails?.[0] || null,
         thumbnails: thumbnails?.length ? thumbnails : null,
         status: "pending",
