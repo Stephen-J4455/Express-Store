@@ -436,6 +436,7 @@ const styles = StyleSheet.create({
     paddingRight: 16,
     fontSize: 16,
     color: colors.dark,
+    ...(Platform.OS === "web" ? { outlineStyle: "none", outlineWidth: 0 } : {}),
   },
   input: {
     borderWidth: 1,
@@ -445,6 +446,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: "#fff",
     color: colors.dark,
+    ...(Platform.OS === "web" ? { outlineStyle: "none", outlineWidth: 0 } : {}),
   },
   inputHelp: {
     fontSize: 12,

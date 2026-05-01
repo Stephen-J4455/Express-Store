@@ -312,6 +312,7 @@ const styles = StyleSheet.create({
     color: colors.dark,
     fontSize: 15,
     fontWeight: "500",
+    ...(Platform.OS === "web" ? { outlineStyle: "none", outlineWidth: 0 } : {}),
   },
   filters: {
     flexDirection: "row",

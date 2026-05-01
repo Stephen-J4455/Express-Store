@@ -70,6 +70,7 @@ const CatalogScreen = () => {
   const [description, setDescription] = useState("");
   const [discount, setDiscount] = useState(0);
   const [imageUris, setImageUris] = useState([]);
+  const [imageFiles, setImageFiles] = useState({});
   const [existingImageUrls, setExistingImageUrls] = useState([]);
   const [removingImageUrl, setRemovingImageUrl] = useState(null);
   const [selectedSizes, setSelectedSizes] = useState([]);
@@ -84,6 +85,7 @@ const CatalogScreen = () => {
   const [tags, setTags] = useState("");
   const [trackInventory, setTrackInventory] = useState(true);
   const [allowBackorder, setAllowBackorder] = useState(false);
+  const [isPreorder, setIsPreorder] = useState(false);
   const [weightUnit, setWeightUnit] = useState("kg");
   const [slug, setSlug] = useState("");
   const [specifications, setSpecifications] = useState([]);
@@ -198,6 +200,7 @@ const CatalogScreen = () => {
     setDescription("");
     setDiscount(0);
     setImageUris([]);
+    setImageFiles({});
     setExistingImageUrls([]);
     setRemovingImageUrl(null);
     setSelectedSizes([]);
@@ -212,6 +215,7 @@ const CatalogScreen = () => {
     setTags("");
     setTrackInventory(true);
     setAllowBackorder(false);
+    setIsPreorder(false);
     setWeightUnit("kg");
     setSlug("");
     setSpecifications([]);
@@ -250,6 +254,7 @@ const CatalogScreen = () => {
     setSlug(product.slug || "");
     setTrackInventory(product.track_inventory ?? true);
     setAllowBackorder(product.allow_backorder ?? false);
+    setIsPreorder(!!product.is_preorder);
     if (product.specifications && typeof product.specifications === "object") {
       const specsArray = Object.entries(product.specifications).map(
         ([key, value]) => ({ key, value }),
@@ -266,6 +271,7 @@ const CatalogScreen = () => {
     setExistingImageUrls(currentImages);
     setRemovingImageUrl(null);
     setImageUris([]);
+    setImageFiles({});
     setModalVisible(true);
   };
 
@@ -379,6 +385,21 @@ const CatalogScreen = () => {
     if (!result.canceled) {
       const newUris = result.assets.map((asset) => asset.uri);
       setImageUris((prev) => [...prev, ...newUris]);
+      if (Platform.OS === "web") {
+        setImageFiles((prev) => {
+          const next = { ...prev };
+          result.assets.forEach((asset) => {
+            if (asset?.uri && asset?.file) {
+              next[asset.uri] = {
+                file: asset.file,
+                type: asset.mimeType || asset.file?.type || null,
+                name: asset.fileName || asset.file?.name || null,
+              };
+            }
+          });
+          return next;
+        });
+      }
     }
   };
 
@@ -419,12 +440,13 @@ const CatalogScreen = () => {
       // Upload using Blob on web and FormData on native
       let uploadRes;
       if (Platform.OS === "web") {
-        const response = await fetch(uri);
-        const blob = await response.blob();
+        const pickedFile = imageFiles?.[uri]?.file || null;
+        const fileType = imageFiles?.[uri]?.type || null;
+        const blob = pickedFile ? pickedFile : await (await fetch(uri)).blob();
         uploadRes = await supabase.storage
           .from("express-products")
           .upload(objectPath, blob, {
-            contentType,
+            contentType: fileType || contentType,
             cacheControl: "3600",
             upsert: false,
           });
@@ -600,10 +622,12 @@ const CatalogScreen = () => {
   };
 
   const submit = async () => {
-    if (!title || !price || !category || !quantity) {
+    if (!title || !price || !category || (!isPreorder && !quantity)) {
       toast.warning(
         "Missing info",
-        "Please fill title, price, category, and quantity.",
+        isPreorder
+          ? "Please fill title, price, and category."
+          : "Please fill title, price, category, and quantity.",
       );
       return;
     }
@@ -638,7 +662,9 @@ const CatalogScreen = () => {
           ...(!shippingFee || parseFloat(shippingFee) === 0
             ? ["free_shipping"]
             : []),
-          ...(quantity && parseInt(quantity) > 0 ? ["limited_stock"] : []),
+          ...(!isPreorder && quantity && parseInt(quantity) > 0
+            ? ["limited_stock"]
+            : []),
         ],
         colors: selectedColors,
         quantity: quantity ? parseInt(quantity) : 0,
@@ -658,6 +684,7 @@ const CatalogScreen = () => {
           : [],
         track_inventory: trackInventory,
         allow_backorder: allowBackorder,
+        is_preorder: isPreorder,
         specifications:
           Object.keys(specificationsObj).length > 0 ? specificationsObj : null,
       };
@@ -681,6 +708,7 @@ const CatalogScreen = () => {
       setDescription("");
       setDiscount(0);
       setImageUris([]);
+      setImageFiles({});
       setExistingImageUrls([]);
       setSelectedSizes([]);
       setSelectedColors([]);
@@ -696,6 +724,7 @@ const CatalogScreen = () => {
       setSlug("");
       setTrackInventory(true);
       setAllowBackorder(false);
+      setIsPreorder(false);
       setSpecifications([]);
       setEditingProduct(null);
       setModalVisible(false);
@@ -1142,7 +1171,11 @@ const CatalogScreen = () => {
 
                 <View style={isWide ? styles.row : null}>
                   <View style={isWide ? styles.halfInput : null}>
-                    <Text style={styles.label}>Stock Quantity *</Text>
+                    <Text style={styles.label}>
+                      {isPreorder
+                        ? "Stock Quantity (optional for preorder)"
+                        : "Stock Quantity *"}
+                    </Text>
                     <View style={styles.inputContainer}>
                       <Ionicons
                         name="cube"
@@ -1151,7 +1184,11 @@ const CatalogScreen = () => {
                         style={styles.inputIcon}
                       />
                       <TextInput
-                        placeholder="Available quantity (e.g., 50)"
+                        placeholder={
+                          isPreorder
+                            ? "Leave empty for preorder"
+                            : "Available quantity (e.g., 50)"
+                        }
                         style={styles.input}
                         keyboardType="numeric"
                         value={quantity}
@@ -1348,6 +1385,14 @@ const CatalogScreen = () => {
                               setImageUris((prev) =>
                                 prev.filter((_, i) => i !== index),
                               );
+                              setImageFiles((prev) => {
+                                const next = { ...prev };
+                                const uri = imageUris[index];
+                                if (uri) {
+                                  delete next[uri];
+                                }
+                                return next;
+                              });
                             }}
                           >
                             <Ionicons
@@ -1613,6 +1658,35 @@ const CatalogScreen = () => {
 
                 <Text style={styles.label}>Inventory Settings</Text>
                 <View style={styles.settingsRow}>
+                  <View style={styles.settingItem}>
+                    <View style={styles.settingLeft}>
+                      <Ionicons
+                        name="time-outline"
+                        size={20}
+                        color={theme.primary}
+                      />
+                      <View style={styles.settingTextContainer}>
+                        <Text style={styles.settingTitle}>Preorder Mode</Text>
+                        <Text style={styles.settingDescription}>
+                          Accept orders before stock arrives
+                        </Text>
+                      </View>
+                    </View>
+                    <Pressable
+                      style={[
+                        styles.toggle,
+                        isPreorder && { backgroundColor: theme.primary },
+                      ]}
+                      onPress={() => setIsPreorder(!isPreorder)}
+                    >
+                      <View
+                        style={[
+                          styles.toggleThumb,
+                          isPreorder && styles.toggleThumbActive,
+                        ]}
+                      />
+                    </Pressable>
+                  </View>
                   <View style={styles.settingItem}>
                     <View style={styles.settingLeft}>
                       <Ionicons
@@ -2010,9 +2084,13 @@ const CatalogScreen = () => {
                     </Text>
                   </View>
                   <View style={styles.detailGridItem}>
-                    <Text style={styles.detailLabel}>Stock</Text>
+                    <Text style={styles.detailLabel}>
+                      {viewingProduct?.is_preorder ? "Availability" : "Stock"}
+                    </Text>
                     <Text style={styles.detailText}>
-                      {viewingProduct?.quantity || 0}
+                      {viewingProduct?.is_preorder
+                        ? "Preorder"
+                        : viewingProduct?.quantity || 0}
                     </Text>
                   </View>
                 </View>
@@ -2211,7 +2289,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
     padding: 16,
-    paddingTop: 50,
   },
   primaryButton: {
     backgroundColor: colors.primary,
@@ -2786,6 +2863,7 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     color: colors.dark,
+    ...(Platform.OS === "web" ? { outlineStyle: "none", outlineWidth: 0 } : {}),
   },
   searchContainer: {
     flexDirection: "row",
@@ -2805,6 +2883,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: colors.dark,
     fontSize: 16,
+    ...(Platform.OS === "web" ? { outlineStyle: "none", outlineWidth: 0 } : {}),
   },
   discountRow: {
     flexDirection: "row",
@@ -2843,6 +2922,7 @@ const styles = StyleSheet.create({
     borderColor: "#D8DDE8",
     borderRadius: 8,
     backgroundColor: colors.light,
+    ...(Platform.OS === "web" ? { outlineStyle: "none", outlineWidth: 0 } : {}),
   },
   hint: {
     fontSize: 12,

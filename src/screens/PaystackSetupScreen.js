@@ -8,6 +8,7 @@ import {
   Animated,
   ActivityIndicator,
   ScrollView,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSeller } from "../context/SellerContext";
@@ -431,6 +432,7 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     padding: 24,
     backgroundColor: colors.surface,
+    ...(Platform.OS === "web" ? { outlineStyle: "none", outlineWidth: 0 } : {}),
   },
   scrollContainer: {
     paddingTop: 40,
@@ -453,6 +455,7 @@ const styles = StyleSheet.create({
     padding: 24,
     backgroundColor: colors.surface,
     marginBottom: 12,
+    ...(Platform.OS === "web" ? { outlineStyle: "none", outlineWidth: 0 } : {}),
   },
   container: { flex: 1 },
   footer: {

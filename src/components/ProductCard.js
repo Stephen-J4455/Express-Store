@@ -4,6 +4,16 @@ import { colors, getTheme } from "../theme/colors";
 import { StatusPill } from "./StatusPill";
 import { FlashSaleBadge } from "./FlashSaleBadge";
 
+const toBoolean = (value) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "true" || normalized === "1" || normalized === "yes";
+  }
+  return false;
+};
+
 export const ProductCard = ({
   product,
   onPress,
@@ -13,7 +23,8 @@ export const ProductCard = ({
   const theme = themeProp || getTheme(colors.primary);
   const hasInventoryValue = product?.quantity != null || product?.stock != null;
   const availableStock = Number(product?.quantity ?? product?.stock ?? 0);
-  const isOutOfStock = hasInventoryValue && availableStock <= 0;
+  const isPreorder = toBoolean(product?.is_preorder);
+  const isOutOfStock = !isPreorder && hasInventoryValue && availableStock <= 0;
   // Handle flash sale data - could be passed directly or from product.flash_sale array
   const activeFlashSale =
     flashSale ||
@@ -56,6 +67,11 @@ export const ProductCard = ({
             </Text>
           </View>
         ) : null}
+        {isPreorder && (
+          <View style={styles.preorderOverlay}>
+            <Text style={styles.preorderOverlayText}>Preorder</Text>
+          </View>
+        )}
         {isOutOfStock && (
           <View style={styles.outOfStockOverlay}>
             <Text style={styles.outOfStockOverlayText}>Out of Stock</Text>
@@ -88,11 +104,13 @@ export const ProductCard = ({
           <View style={styles.metaRow}>
             <Ionicons name="cube-outline" size={12} color={colors.muted} />
             <Text style={[styles.metaText, isOutOfStock && styles.stockDanger]}>
-              {isOutOfStock
-                ? "Out of stock"
-                : hasInventoryValue
-                  ? `Stock: ${availableStock}`
-                  : "Stock: --"}
+              {isPreorder
+                ? "Preorder"
+                : isOutOfStock
+                  ? "Out of stock"
+                  : hasInventoryValue
+                    ? `Stock: ${availableStock}`
+                    : "Stock: --"}
             </Text>
           </View>
         </View>
@@ -241,5 +259,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: -0.2,
+  },
+  preorderOverlay: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    backgroundColor: "#0EA5E9",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    zIndex: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  preorderOverlayText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+    textTransform: "uppercase",
   },
 });

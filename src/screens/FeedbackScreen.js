@@ -521,6 +521,7 @@ const styles = StyleSheet.create({
     height: 120,
     textAlignVertical: "top",
     marginBottom: 16,
+    ...(Platform.OS === "web" ? { outlineStyle: "none", outlineWidth: 0 } : {}),
   },
   sendButton: {
     borderRadius: 12,

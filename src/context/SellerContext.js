@@ -1047,6 +1047,7 @@ export const SellerProvider = ({ children }) => {
       tags,
       track_inventory,
       allow_backorder,
+      is_preorder,
       specifications,
     }) => {
       if (!supabase) {
@@ -1100,6 +1101,7 @@ export const SellerProvider = ({ children }) => {
         tags: tags?.length ? tags : null,
         track_inventory: track_inventory !== false,
         allow_backorder: allow_backorder === true,
+        is_preorder: is_preorder === true,
         specifications: specifications || null,
       };
 

@@ -2735,7 +2735,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   heroGradient: {
-    padding: 18,
+    minHeight: 220,
+    width: "100%",
   },
   heroBackgroundImage: {
     resizeMode: "cover",
@@ -3255,6 +3256,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
     backgroundColor: "#fff",
+    ...(Platform.OS === "web" ? { outlineStyle: "none", outlineWidth: 0 } : {}),
   },
   textAreaInput: {
     minHeight: 110,
