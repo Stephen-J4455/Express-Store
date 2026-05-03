@@ -48,6 +48,12 @@ export default function SellerLoginScreen({ navigation }) {
   return (
     <ResponsiveContainer maxWidth={480}>
       <SafeAreaView style={styles.container}>
+        <View style={styles.bgCircle1} />
+        <View style={styles.bgCircle2} />
+        <View style={styles.bgCircle3} />
+        <View style={styles.bgCircle4} />
+        <View style={styles.bgCircle5} />
+        <View style={styles.bgCircle6} />
         <View style={styles.content}>
           <View style={styles.logoContainer}>
             <Ionicons name="storefront" size={80} color={colors.primary} />
@@ -129,6 +135,60 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  bgCircle1: {
+    position: "absolute",
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: `${colors.primary}35`,
+    top: -50,
+    right: -50,
+  },
+  bgCircle2: {
+    position: "absolute",
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: `${colors.accent}30`,
+    top: 200,
+    left: -40,
+  },
+  bgCircle3: {
+    position: "absolute",
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: `${colors.primary}28`,
+    bottom: 100,
+    right: -30,
+  },
+  bgCircle4: {
+    position: "absolute",
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: `${colors.accent}25`,
+    bottom: 50,
+    left: -60,
+  },
+  bgCircle5: {
+    position: "absolute",
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: `${colors.primary}22`,
+    top: 400,
+    right: 30,
+  },
+  bgCircle6: {
+    position: "absolute",
+    width: 130,
+    height: 130,
+    borderRadius: 65,
+    backgroundColor: `${colors.accent}32`,
+    bottom: 200,
+    right: 50,
   },
   content: {
     flex: 1,
