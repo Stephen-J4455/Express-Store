@@ -15,6 +15,7 @@ import {
   Modal,
   Linking,
   Platform,
+  KeyboardAvoidingView,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
@@ -23,6 +24,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSeller } from "../context/SellerContext";
 import { useToast } from "../context/ToastContext";
 import { useNavigation, useRoute } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, getTheme, THEMES } from "../theme/colors";
 import { supabase, invokeEdgeFunction } from "../../supabase";
 import { LoadingAnimation } from "../components/LoadingAnimation";
@@ -76,6 +78,7 @@ const getProfileAvatarValue = (profile) => {
 };
 
 export const ProfileScreen = () => {
+  const insets = useSafeAreaInsets();
   const {
     profile,
     categories,
@@ -265,6 +268,23 @@ Company: ExpressMart`;
     start.setHours(0, 0, 0, 0);
     return orders.filter((o) => new Date(o.created_at) >= start).length;
   }, [orders]);
+
+  const followersThisMonth = useMemo(() => {
+    if (!followers?.length) return 0;
+    const now = new Date();
+    return followers.filter((f) => {
+      const followedAt = new Date(f.created_at);
+      return (
+        followedAt.getMonth() === now.getMonth() &&
+        followedAt.getFullYear() === now.getFullYear()
+      );
+    }).length;
+  }, [followers]);
+
+  const latestFollower = useMemo(
+    () => followers?.[0]?.user?.full_name || "No recent follower",
+    [followers],
+  );
 
   // Jump to tab when navigated with initialTab param
   useEffect(() => {
@@ -928,7 +948,7 @@ Company: ExpressMart`;
           >
             <Ionicons
               name="person"
-              size={18}
+              size={16}
               color={activeTab === "main" ? theme.primary : colors.muted}
             />
             <Text
@@ -952,7 +972,7 @@ Company: ExpressMart`;
           >
             <Ionicons
               name="people"
-              size={18}
+              size={16}
               color={activeTab === "followers" ? theme.primary : colors.muted}
             />
             <Text
@@ -977,6 +997,30 @@ Company: ExpressMart`;
             )}
           </Pressable>
 
+          <Pressable
+            style={[
+              styles.profileTabItem,
+              activeTab === "support" && {
+                backgroundColor: `${theme.primary}15`,
+              },
+            ]}
+            onPress={() => setActiveTab("support")}
+          >
+            <Ionicons
+              name="help-circle"
+              size={16}
+              color={activeTab === "support" ? theme.primary : colors.muted}
+            />
+            <Text
+              style={[
+                styles.profileTabText,
+                activeTab === "support" && { color: theme.primary },
+              ]}
+            >
+              Support
+            </Text>
+          </Pressable>
+
           {!isWide && (
             <Pressable
               style={[
@@ -989,7 +1033,7 @@ Company: ExpressMart`;
             >
               <Ionicons
                 name="star"
-                size={18}
+                size={16}
                 color={activeTab === "feedback" ? theme.primary : colors.muted}
               />
               <Text
@@ -1409,10 +1453,14 @@ Company: ExpressMart`;
                   visible={paymentEditVisible}
                   animationType="slide"
                   transparent={false}
+                  statusBarTranslucent
                   onRequestClose={() => setPaymentEditVisible(false)}
                 >
                   <ScrollView
-                    contentContainerStyle={styles.editPageContainer}
+                    contentContainerStyle={[
+                      styles.editPageContainer,
+                      { paddingTop: Math.max(insets.top, 0) + 12 },
+                    ]}
                     showsVerticalScrollIndicator={false}
                   >
                     <View style={styles.editHeroWrap}>
@@ -1812,66 +1860,90 @@ Company: ExpressMart`;
 
             {/* Followers Tab */}
             {activeTab === "followers" && (
-              <View style={styles.tabContent}>
+              <View style={[styles.tabContent, styles.followersPageContent]}>
                 <LinearGradient
-                  colors={["#F7FAFF", "#FFFFFF"]}
+                  colors={["#0F172A", "#1E293B", "#0F172A"]}
                   style={styles.followersHero}
                 >
-                  <View style={styles.followersHeaderRow}>
+                  <View style={styles.followersHeroHeader}>
                     <View>
                       <Text style={styles.followersHeroTitle}>Followers</Text>
                       <Text style={styles.followersHeroSubtitle}>
-                        Customers following your store
+                        Community growth and latest supporter activity
                       </Text>
                     </View>
-                    <View
-                      style={[
-                        styles.followerCountBadge,
-                        { backgroundColor: `${theme.primary}1F` },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.followerCountText,
-                          { color: theme.primary },
-                        ]}
-                      >
+                    <View style={styles.followersHeroBadge}>
+                      <Ionicons name="people" size={14} color="#fff" />
+                      <Text style={styles.followersHeroBadgeText}>
                         {followers.length}
                       </Text>
                     </View>
                   </View>
+                  <View style={styles.followersSummaryGrid}>
+                    <View style={styles.followersSummaryCard}>
+                      <Text style={styles.followersSummaryLabel}>
+                        Total followers
+                      </Text>
+                      <Text style={styles.followersSummaryValue}>
+                        {followers.length}
+                      </Text>
+                    </View>
+                    <View style={styles.followersSummaryCard}>
+                      <Text style={styles.followersSummaryLabel}>
+                        New this month
+                      </Text>
+                      <Text style={styles.followersSummaryValue}>
+                        {followersThisMonth}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.followersLatestRow}>
+                    <Ionicons
+                      name="sparkles-outline"
+                      size={14}
+                      color="rgba(255,255,255,0.85)"
+                    />
+                    <Text style={styles.followersLatestText}>
+                      Latest follower: {latestFollower}
+                    </Text>
+                  </View>
                 </LinearGradient>
 
-                <View style={styles.card}>
-                  {followersLoading ? (
-                    <View style={styles.loadingContainer}>
-                      <ActivityIndicator size="large" color={theme.primary} />
-                      <Text style={styles.loadingText}>
-                        Loading followers...
-                      </Text>
-                    </View>
-                  ) : followers.length === 0 ? (
-                    <View style={styles.emptyFollowers}>
-                      <Ionicons
-                        name="people-outline"
-                        size={48}
-                        color={colors.muted}
-                      />
-                      <Text style={styles.emptyFollowersTitle}>
-                        No followers yet
-                      </Text>
-                      <Text style={styles.emptyFollowersText}>
-                        Your followers will appear here as customers follow your
-                        store.
-                      </Text>
-                    </View>
-                  ) : (
-                    <View style={styles.followersList}>
-                      {followers.map((follow) => (
-                        <View
-                          key={follow.id}
-                          style={styles.followerItemRedesign}
-                        >
+                {followersLoading ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={theme.primary} />
+                    <Text style={styles.loadingText}>Loading followers...</Text>
+                  </View>
+                ) : followers.length === 0 ? (
+                  <View style={styles.emptyFollowers}>
+                    <Ionicons name="people-outline" size={44} color="#94A3B8" />
+                    <Text style={styles.emptyFollowersTitle}>No followers yet</Text>
+                    <Text style={styles.emptyFollowersText}>
+                      Your followers will appear here as customers follow your
+                      store.
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.followersList}>
+                    {followers.map((follow, index) => {
+                      const followerName = follow.user?.full_name || "Customer";
+                      const initials = followerName
+                        .split(" ")
+                        .map((part) => part?.[0] || "")
+                        .join("")
+                        .slice(0, 2)
+                        .toUpperCase();
+                      const followedDate = new Date(
+                        follow.created_at,
+                      ).toLocaleDateString();
+
+                      return (
+                        <View key={follow.id} style={styles.followerItemRedesign}>
+                          <View style={styles.followerRankBadge}>
+                            <Text style={styles.followerRankText}>
+                              #{index + 1}
+                            </Text>
+                          </View>
                           <View style={styles.followerAvatar}>
                             {follow.user?.avatar_url ? (
                               <Image
@@ -1879,42 +1951,103 @@ Company: ExpressMart`;
                                 style={styles.followerAvatarImage}
                               />
                             ) : (
-                              <Ionicons
-                                name="person"
-                                size={22}
-                                color={theme.primary}
-                              />
+                              <Text
+                                style={[
+                                  styles.followerAvatarInitials,
+                                  { color: theme.primary },
+                                ]}
+                              >
+                                {initials || "CU"}
+                              </Text>
                             )}
                           </View>
                           <View style={styles.followerInfo}>
-                            <Text style={styles.followerName}>
-                              {follow.user?.full_name || "Customer"}
-                            </Text>
-                            <Text style={styles.followerDate}>
-                              Followed{" "}
-                              {new Date(follow.created_at).toLocaleDateString()}
-                            </Text>
+                            <Text style={styles.followerName}>{followerName}</Text>
+                            <View style={styles.followerMetaRow}>
+                              <Ionicons
+                                name="calendar-outline"
+                                size={12}
+                                color={colors.muted}
+                              />
+                              <Text style={styles.followerDate}>
+                                Followed on {followedDate}
+                              </Text>
+                            </View>
                           </View>
-                          <Ionicons
-                            name="chevron-forward"
-                            size={16}
-                            color={colors.muted}
-                          />
+                          <View style={styles.followerPill}>
+                            <Text style={styles.followerPillText}>Active</Text>
+                          </View>
                         </View>
-                      ))}
-                    </View>
-                  )}
-                </View>
+                      );
+                    })}
+                  </View>
+                )}
               </View>
             )}
 
             {activeTab === "support" && (
-              <View style={styles.tabContent}>
-                <View style={styles.card}>
-                  <Text style={styles.section}>Support</Text>
+              <View style={[styles.tabContent, styles.supportPageContent]}>
+                <LinearGradient
+                  colors={["#0F172A", "#1E293B", "#0F172A"]}
+                  style={styles.supportHero}
+                >
+                  <Text style={styles.supportHeroTitle}>Support Center</Text>
+                  <Text style={styles.supportHeroSubtitle}>
+                    Get help with payouts, account settings, and store operations.
+                  </Text>
+                  <View style={styles.supportHeroMetaRow}>
+                    <View style={styles.supportHeroMetaPill}>
+                      <Ionicons
+                        name="time-outline"
+                        size={13}
+                        color="rgba(255,255,255,0.9)"
+                      />
+                      <Text style={styles.supportHeroMetaText}>
+                        Avg. response: within 24h
+                      </Text>
+                    </View>
+                    <View style={styles.supportHeroMetaPill}>
+                      <Ionicons
+                        name="mail-outline"
+                        size={13}
+                        color="rgba(255,255,255,0.9)"
+                      />
+                      <Text style={styles.supportHeroMetaText}>
+                        expressmart233@gmail.com
+                      </Text>
+                    </View>
+                  </View>
+                </LinearGradient>
+
+                <View style={styles.supportQuickActionsRow}>
+                  <View style={styles.supportQuickActionCard}>
+                    <Ionicons
+                      name="headset-outline"
+                      size={18}
+                      color={theme.primary}
+                    />
+                    <Text style={styles.supportQuickActionTitle}>Live help</Text>
+                    <Text style={styles.supportQuickActionText}>
+                      Reach out with account or payout questions.
+                    </Text>
+                  </View>
+                  <View style={styles.supportQuickActionCard}>
+                    <Ionicons
+                      name="document-text-outline"
+                      size={18}
+                      color={theme.primary}
+                    />
+                    <Text style={styles.supportQuickActionTitle}>Ticket</Text>
+                    <Text style={styles.supportQuickActionText}>
+                      Submit details and track support updates.
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.supportFormCard}>
+                  <Text style={styles.supportFormTitle}>Create support request</Text>
                   <Text style={styles.supportHint}>
-                    Need help with orders, payouts, or your account? Send a
-                    support request.
+                    Tell us what you need and we will follow up by email.
                   </Text>
 
                   <Text style={styles.label}>Subject</Text>
@@ -1969,16 +2102,13 @@ Company: ExpressMart`;
 
                   <Pressable
                     onPress={submitSupport}
-                    style={[
-                      styles.saveButton,
-                      { backgroundColor: theme.primary },
-                    ]}
+                    style={[styles.supportSubmitButton, { backgroundColor: theme.primary }]}
                     disabled={supportSubmitting}
                   >
                     {supportSubmitting ? (
                       <ActivityIndicator color="#fff" />
                     ) : (
-                      <Text style={{ color: "#fff", fontWeight: "800" }}>
+                      <Text style={styles.supportSubmitButtonText}>
                         Send Request
                       </Text>
                     )}
@@ -1994,10 +2124,14 @@ Company: ExpressMart`;
           visible={privacyVisible}
           animationType="slide"
           transparent={false}
+          statusBarTranslucent
           onRequestClose={() => setPrivacyVisible(false)}
         >
           <ScrollView
-            contentContainerStyle={styles.editPageContainer}
+            contentContainerStyle={[
+              styles.editPageContainer,
+              { paddingTop: Math.max(insets.top, 0) + 12 },
+            ]}
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.editHeroWrap}>
@@ -2018,54 +2152,44 @@ Company: ExpressMart`;
               </LinearGradient>
             </View>
 
-            <View style={styles.card}>
-              <View style={styles.legalMetaRow}>
-                <View style={styles.legalMetaChip}>
-                  <Ionicons
-                    name="calendar-outline"
-                    size={14}
-                    color={colors.muted}
-                  />
-                  <Text style={styles.legalMetaText}>
-                    Updated: March 1, 2026
-                  </Text>
-                </View>
-                <View style={styles.legalMetaChip}>
-                  <Ionicons
-                    name="shield-checkmark-outline"
-                    size={14}
-                    color={colors.muted}
-                  />
-                  <Text style={styles.legalMetaText}>ExpressMart Policy</Text>
-                </View>
+            <View style={styles.legalMetaRow}>
+              <View style={styles.legalMetaChip}>
+                <Ionicons name="calendar-outline" size={14} color={colors.muted} />
+                <Text style={styles.legalMetaText}>Updated: March 1, 2026</Text>
               </View>
-
-              <View style={styles.legalBodyCard}>
-                <Text style={styles.legalBodyText}>{PRIVACY_POLICY_TEXT}</Text>
-              </View>
-
-              <View style={styles.legalHelpCard}>
+              <View style={styles.legalMetaChip}>
                 <Ionicons
-                  name="mail-unread-outline"
-                  size={18}
-                  color={theme.primary}
+                  name="shield-checkmark-outline"
+                  size={14}
+                  color={colors.muted}
                 />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.legalHelpTitle}>Need clarification?</Text>
-                  <Text style={styles.legalHelpText}>
-                    Contact support at expressmart233@gmail.com for policy
-                    questions.
-                  </Text>
-                </View>
+                <Text style={styles.legalMetaText}>ExpressMart Policy</Text>
               </View>
-
-              <Pressable
-                style={[styles.saveButton, { marginTop: 12 }]}
-                onPress={() => setPrivacyVisible(false)}
-              >
-                <Text style={{ color: "#fff", fontWeight: "800" }}>Close</Text>
-              </Pressable>
             </View>
+
+            <Text style={styles.legalBodyText}>{PRIVACY_POLICY_TEXT}</Text>
+
+            <View style={styles.legalHelpCard}>
+              <Ionicons
+                name="mail-unread-outline"
+                size={18}
+                color={theme.primary}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.legalHelpTitle}>Need clarification?</Text>
+                <Text style={styles.legalHelpText}>
+                  Contact support at expressmart233@gmail.com for policy
+                  questions.
+                </Text>
+              </View>
+            </View>
+
+            <Pressable
+              style={[styles.saveButton, { marginTop: 12 }]}
+              onPress={() => setPrivacyVisible(false)}
+            >
+              <Text style={{ color: "#fff", fontWeight: "800" }}>Close</Text>
+            </Pressable>
           </ScrollView>
         </Modal>
 
@@ -2081,289 +2205,290 @@ Company: ExpressMart`;
           visible={editing}
           animationType="slide"
           transparent={false}
+          statusBarTranslucent
           onRequestClose={() => setEditing(false)}
         >
-          <ScrollView
-            contentContainerStyle={styles.editPageContainer}
-            showsVerticalScrollIndicator={false}
+          <KeyboardAvoidingView
+            style={styles.editModalRoot}
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
           >
-            <View style={styles.editHeroWrap}>
-              <ImageBackground
-                source={editAvatar ? { uri: editAvatar } : undefined}
-                style={styles.editHeroImage}
-                imageStyle={styles.editHeroImageInner}
-              >
-                <LinearGradient
-                  colors={["rgba(15,23,42,0.68)", "rgba(15,23,42,0.82)"]}
-                  style={styles.editHeroGradient}
+            <ScrollView
+              contentContainerStyle={[
+                styles.editPageContainer,
+                isWide && styles.editPageContainerWide,
+                { paddingTop: Math.max(insets.top, 0) + 12 },
+              ]}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={styles.editHeroWrap}>
+                <ImageBackground
+                  source={editAvatar ? { uri: editAvatar } : undefined}
+                  style={styles.editHeroImage}
+                  imageStyle={styles.editHeroImageInner}
                 >
-                  <Pressable
-                    onPress={() => setEditing(false)}
-                    style={styles.editHeroCloseButton}
+                  <LinearGradient
+                    colors={["rgba(15,23,42,0.65)", "rgba(15,23,42,0.86)"]}
+                    style={styles.editHeroGradient}
                   >
-                    <Ionicons name="close" size={18} color="#fff" />
-                  </Pressable>
-                  <Text style={styles.editHeroTitle}>Edit Profile</Text>
-                  <Text style={styles.editHeroSubtitle}>
-                    Update your public seller identity and store details.
-                  </Text>
-                </LinearGradient>
-              </ImageBackground>
-            </View>
-
-            <View style={styles.card}>
-              <View style={styles.editMediaRow}>
-                <Pressable onPress={pickImage} style={styles.editPhotoButton}>
-                  <Ionicons
-                    name="image-outline"
-                    size={18}
-                    color={theme.primary}
-                  />
-                  <Text
-                    style={[
-                      styles.editPhotoButtonText,
-                      { color: theme.primary },
-                    ]}
-                  >
-                    Change Cover Image
-                  </Text>
-                </Pressable>
+                    <Pressable
+                      onPress={() => setEditing(false)}
+                      style={styles.editHeroCloseButton}
+                    >
+                      <Ionicons name="close" size={18} color="#fff" />
+                    </Pressable>
+                    <Text style={styles.editHeroTitle}>Edit Profile</Text>
+                    <Text style={styles.editHeroSubtitle}>
+                      Update store identity, social links, and brand settings.
+                    </Text>
+                    <View style={styles.editInfoPill}>
+                      <Ionicons
+                        name="checkmark-circle-outline"
+                        size={14}
+                        color={colors.muted}
+                      />
+                      <Text style={styles.editInfoPillText}>
+                        Changes are visible to customers after saving
+                      </Text>
+                    </View>
+                  </LinearGradient>
+                </ImageBackground>
               </View>
 
-              <View style={styles.editForm}>
-                <Text style={styles.editSectionCaption}>Business details</Text>
-                <Text style={styles.label}>Store Name</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editName}
-                  onChangeText={setEditName}
-                  placeholder="Store name"
-                />
-                <Text style={styles.label}>Email</Text>
-                <TextInput
-                  style={[styles.input, { backgroundColor: "#F3F4F6" }]}
-                  value={editEmail}
-                  editable={false}
-                  placeholder="Email"
-                  keyboardType="email-address"
-                />
-                <Text style={styles.label}>Phone</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editPhone}
-                  onChangeText={setEditPhone}
-                  placeholder="Phone number"
-                  keyboardType="phone-pad"
-                />
-                <Text style={styles.label}>Location</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editLocation}
-                  onChangeText={setEditLocation}
-                  placeholder="Store location"
-                />
-                <Text style={styles.label}>Store Description</Text>
-                <TextInput
-                  style={[styles.input, styles.textAreaInput]}
-                  value={editStoreDescription}
-                  onChangeText={setEditStoreDescription}
-                  placeholder="Tell customers what your store is about"
-                  multiline
-                  numberOfLines={4}
-                  textAlignVertical="top"
-                  maxLength={600}
-                />
-                <Text style={styles.label}>Fulfillment Speed</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editFulfillmentSpeed}
-                  onChangeText={setEditFulfillmentSpeed}
-                  placeholder="e.g., Same day, 2-3 days"
-                />
-                <Text style={styles.label}>Weekly Target ($)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editWeeklyTarget}
-                  onChangeText={setEditWeeklyTarget}
-                  placeholder="Target revenue"
-                  keyboardType="numeric"
-                />
-
-                <Text style={styles.editSectionCaption}>Social links</Text>
-                <Text style={styles.label}>Facebook</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editFacebook}
-                  onChangeText={setEditFacebook}
-                  placeholder="https://facebook.com/yourpage"
-                  keyboardType="url"
-                />
-                <Text style={styles.label}>Instagram</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editInstagram}
-                  onChangeText={setEditInstagram}
-                  placeholder="https://instagram.com/yourhandle"
-                  keyboardType="url"
-                />
-                <Text style={styles.label}>Twitter/X</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editTwitter}
-                  onChangeText={setEditTwitter}
-                  placeholder="https://twitter.com/yourhandle"
-                  keyboardType="url"
-                />
-                <Text style={styles.label}>WhatsApp</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editWhatsapp}
-                  onChangeText={setEditWhatsapp}
-                  placeholder="+1234567890"
-                  keyboardType="phone-pad"
-                />
-                <Text style={styles.label}>Website</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editWebsite}
-                  onChangeText={setEditWebsite}
-                  placeholder="https://yourwebsite.com"
-                  keyboardType="url"
-                />
-
-                {/* Payment fields moved to the Store Payments card on the main tab */}
-
-                <Text style={styles.label}>Theme color</Text>
-                <View style={styles.themeSwatchesContainer}>
-                  {THEME_OPTIONS.map((c) => (
-                    <View key={c} style={styles.themeSwatchItem}>
-                      <Pressable onPress={() => setEditThemeColor(c)}>
-                        <View
-                          style={[
-                            styles.themeSwatchCircle,
-                            {
-                              backgroundColor: c,
-                              borderWidth: editThemeColor === c ? 3 : 1,
-                              borderColor:
-                                editThemeColor === c ? "#000" : "#E6EDF3",
-                            },
-                          ]}
-                        />
-                      </Pressable>
-                    </View>
-                  ))}
-                </View>
-
-                <View style={{ marginTop: 12 }}>
-                  <Text style={[styles.label, { marginBottom: 8 }]}>
-                    Apply theme to
-                  </Text>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      gap: 16,
-                      alignItems: "center",
-                    }}
-                  >
-                    <Pressable
-                      onPress={() => setEditApplyToStore(!editApplyToStore)}
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 8,
-                      }}
-                    >
-                      <View style={{ width: 40 }}>
-                        <View
-                          style={{
-                            width: 36,
-                            height: 20,
-                            borderRadius: 12,
-                            backgroundColor: editApplyToStore
-                              ? theme.primary
-                              : "#E5E7EB",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <View
-                            style={{
-                              width: 16,
-                              height: 16,
-                              borderRadius: 8,
-                              backgroundColor: "#fff",
-                              marginLeft: editApplyToStore ? 18 : 2,
-                            }}
-                          />
-                        </View>
-                      </View>
-                      <Text style={styles.tabText}>Store app</Text>
+              <View style={[styles.editGrid, isWide && styles.editGridWide]}>
+                <View style={styles.editSectionCard}>
+                  <Text style={styles.editSectionCaption}>Business details</Text>
+                  <View style={styles.editMediaRow}>
+                    <Pressable onPress={pickImage} style={styles.editPhotoButton}>
+                      <Ionicons
+                        name="image-outline"
+                        size={18}
+                        color={theme.primary}
+                      />
+                      <Text
+                        style={[
+                          styles.editPhotoButtonText,
+                          { color: theme.primary },
+                        ]}
+                      >
+                        Change Cover Image
+                      </Text>
                     </Pressable>
-                    <Pressable
-                      onPress={() =>
-                        setEditApplyToCustomer(!editApplyToCustomer)
-                      }
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "center",
-                        gap: 8,
-                      }}
-                    >
-                      <View style={{ width: 40 }}>
-                        <View
-                          style={{
-                            width: 36,
-                            height: 20,
-                            borderRadius: 12,
-                            backgroundColor: editApplyToCustomer
-                              ? theme.primary
-                              : "#E5E7EB",
-                            justifyContent: "center",
-                          }}
-                        >
-                          <View
-                            style={{
-                              width: 16,
-                              height: 16,
-                              borderRadius: 8,
-                              backgroundColor: "#fff",
-                              marginLeft: editApplyToCustomer ? 18 : 2,
-                            }}
-                          />
-                        </View>
-                      </View>
-                      <Text style={styles.tabText}>Customer app</Text>
-                    </Pressable>
+                  </View>
+                  <View style={styles.editForm}>
+                    <Text style={styles.label}>Store Name</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editName}
+                      onChangeText={setEditName}
+                      placeholder="Store name"
+                    />
+                    <Text style={styles.label}>Email</Text>
+                    <TextInput
+                      style={[styles.input, { backgroundColor: "#F3F4F6" }]}
+                      value={editEmail}
+                      editable={false}
+                      placeholder="Email"
+                      keyboardType="email-address"
+                    />
+                    <Text style={styles.label}>Phone</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editPhone}
+                      onChangeText={setEditPhone}
+                      placeholder="Phone number"
+                      keyboardType="phone-pad"
+                    />
+                    <Text style={styles.label}>Location</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editLocation}
+                      onChangeText={setEditLocation}
+                      placeholder="Store location"
+                    />
+                    <Text style={styles.label}>Store Description</Text>
+                    <TextInput
+                      style={[styles.input, styles.textAreaInput]}
+                      value={editStoreDescription}
+                      onChangeText={setEditStoreDescription}
+                      placeholder="Tell customers what your store is about"
+                      multiline
+                      numberOfLines={4}
+                      textAlignVertical="top"
+                      maxLength={600}
+                    />
+                    <Text style={styles.label}>Fulfillment Speed</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editFulfillmentSpeed}
+                      onChangeText={setEditFulfillmentSpeed}
+                      placeholder="e.g., Same day, 2-3 days"
+                    />
+                    <Text style={styles.label}>Weekly Target ($)</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editWeeklyTarget}
+                      onChangeText={setEditWeeklyTarget}
+                      placeholder="Target revenue"
+                      keyboardType="numeric"
+                    />
                   </View>
                 </View>
 
-                <View style={styles.editActionsRow}>
-                  <Pressable
-                    onPress={() => setEditing(false)}
-                    style={styles.cancelButton}
-                  >
-                    <Text style={{ color: colors.muted, fontWeight: "700" }}>
-                      Cancel
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={saveProfile}
-                    style={[
-                      styles.saveButton,
-                      { backgroundColor: theme.primary },
-                    ]}
-                  >
-                    {saving ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={{ color: "#fff", fontWeight: "800" }}>
-                        Save
-                      </Text>
-                    )}
-                  </Pressable>
+                <View style={styles.editSectionColumn}>
+                  <View style={styles.editSectionCard}>
+                    <Text style={styles.editSectionCaption}>Social links</Text>
+                    <View style={styles.editForm}>
+                      <Text style={styles.label}>Facebook</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editFacebook}
+                        onChangeText={setEditFacebook}
+                        placeholder="https://facebook.com/yourpage"
+                        keyboardType="url"
+                      />
+                      <Text style={styles.label}>Instagram</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editInstagram}
+                        onChangeText={setEditInstagram}
+                        placeholder="https://instagram.com/yourhandle"
+                        keyboardType="url"
+                      />
+                      <Text style={styles.label}>Twitter/X</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editTwitter}
+                        onChangeText={setEditTwitter}
+                        placeholder="https://twitter.com/yourhandle"
+                        keyboardType="url"
+                      />
+                      <Text style={styles.label}>WhatsApp</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editWhatsapp}
+                        onChangeText={setEditWhatsapp}
+                        placeholder="+1234567890"
+                        keyboardType="phone-pad"
+                      />
+                      <Text style={styles.label}>Website</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editWebsite}
+                        onChangeText={setEditWebsite}
+                        placeholder="https://yourwebsite.com"
+                        keyboardType="url"
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.editSectionCard}>
+                    <Text style={styles.editSectionCaption}>Brand settings</Text>
+                    <Text style={styles.label}>Theme color</Text>
+                    <View style={styles.themeSwatchesContainer}>
+                      {THEME_OPTIONS.map((c) => (
+                        <View key={c} style={styles.themeSwatchItem}>
+                          <Pressable onPress={() => setEditThemeColor(c)}>
+                            <View
+                              style={[
+                                styles.themeSwatchCircle,
+                                {
+                                  backgroundColor: c,
+                                  borderWidth: editThemeColor === c ? 3 : 1,
+                                  borderColor:
+                                    editThemeColor === c ? "#000" : "#E6EDF3",
+                                },
+                              ]}
+                            />
+                          </Pressable>
+                        </View>
+                      ))}
+                    </View>
+                    <View style={styles.toggleGroup}>
+                      <Text style={styles.toggleGroupTitle}>Apply theme to</Text>
+                      <Pressable
+                        onPress={() => setEditApplyToStore(!editApplyToStore)}
+                        style={styles.toggleRow}
+                      >
+                        <Text style={styles.toggleLabel}>Store app</Text>
+                        <View
+                          style={[
+                            styles.toggleTrack,
+                            {
+                              backgroundColor: editApplyToStore
+                                ? theme.primary
+                                : "#E5E7EB",
+                            },
+                          ]}
+                        >
+                          <View
+                            style={[
+                              styles.toggleThumb,
+                              editApplyToStore && styles.toggleThumbActive,
+                            ]}
+                          />
+                        </View>
+                      </Pressable>
+                      <Pressable
+                        onPress={() =>
+                          setEditApplyToCustomer(!editApplyToCustomer)
+                        }
+                        style={styles.toggleRow}
+                      >
+                        <Text style={styles.toggleLabel}>Customer app</Text>
+                        <View
+                          style={[
+                            styles.toggleTrack,
+                            {
+                              backgroundColor: editApplyToCustomer
+                                ? theme.primary
+                                : "#E5E7EB",
+                            },
+                          ]}
+                        >
+                          <View
+                            style={[
+                              styles.toggleThumb,
+                              editApplyToCustomer && styles.toggleThumbActive,
+                            ]}
+                          />
+                        </View>
+                      </Pressable>
+                    </View>
+                  </View>
                 </View>
               </View>
+            </ScrollView>
+
+            <View style={styles.editFooterBar}>
+              <View style={styles.editActionsRow}>
+                <Pressable
+                  onPress={() => setEditing(false)}
+                  style={styles.cancelButton}
+                >
+                  <Text style={{ color: colors.muted, fontWeight: "700" }}>
+                    Cancel
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={saveProfile}
+                  style={[
+                    styles.saveButton,
+                    { backgroundColor: theme.primary, minWidth: 108 },
+                  ]}
+                >
+                  {saving ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={{ color: "#fff", fontWeight: "800" }}>
+                      Save Changes
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
             </View>
-          </ScrollView>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* Loading Animation Preview Modal */}
@@ -2395,10 +2520,39 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  editModalRoot: {
+    flex: 1,
+    backgroundColor: "#F8FAFD",
+  },
   editPageContainer: {
     padding: 16,
-    paddingBottom: 120,
-    paddingTop: 56,
+    paddingBottom: 180,
+    paddingTop: 16,
+  },
+  editPageContainerWide: {
+    paddingHorizontal: 24,
+    maxWidth: 1180,
+    width: "100%",
+    alignSelf: "center",
+  },
+  editGrid: {
+    gap: 14,
+  },
+  editGridWide: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  editSectionColumn: {
+    flex: 1,
+    gap: 14,
+  },
+  editSectionCard: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
   },
   editHeroWrap: {
     borderRadius: 22,
@@ -2474,7 +2628,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "flex-end",
     gap: 12,
-    marginTop: 16,
+    width: "100%",
+    maxWidth: 1180,
+    alignSelf: "center",
+  },
+  editFooterBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    backgroundColor: "rgba(248,250,253,0.98)",
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
   },
   editInfoPill: {
     marginTop: 12,
@@ -2517,17 +2685,15 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 12,
   },
-  legalBodyCard: {
+  legalBodyText: {
+    color: colors.muted,
+    lineHeight: 20,
+    fontSize: 13,
     borderWidth: 1,
     borderColor: "#E5E7EB",
     borderRadius: 14,
     padding: 14,
     backgroundColor: "#FCFCFD",
-  },
-  legalBodyText: {
-    color: colors.muted,
-    lineHeight: 20,
-    fontSize: 13,
   },
   legalHelpCard: {
     marginTop: 12,
@@ -2555,7 +2721,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     backgroundColor: "#fff",
     paddingTop: 50,
-    paddingHorizontal: 4,
+    paddingHorizontal: 0,
     borderBottomWidth: 1,
     borderBottomColor: "#E4E8F0",
   },
@@ -2563,7 +2729,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "space-between",
     gap: 6,
     paddingVertical: 12,
     borderBottomWidth: 3,
@@ -2573,7 +2739,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.primary,
   },
   tabText: {
-    fontSize: 14,
+    fontSize: 8,
     fontWeight: "600",
     color: colors.muted,
   },
@@ -2581,7 +2747,7 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   tabContent: {
-    padding: 16,
+    paddingVertical: 8,
   },
   profileTabBar: {
     flexDirection: "row",
@@ -2595,26 +2761,26 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: 12,
+    gap: 5,
+    paddingVertical: 8,
+    borderRadius: 10,
     backgroundColor: colors.light,
   },
   profileTabText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "600",
     color: colors.muted,
   },
   profileTabBadge: {
-    paddingHorizontal: 6,
+    paddingHorizontal: 5,
     paddingVertical: 2,
-    borderRadius: 8,
-    minWidth: 20,
+    borderRadius: 7,
+    minWidth: 18,
     alignItems: "center",
   },
   profileTabBadgeText: {
     color: "#fff",
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: "700",
   },
   card: {
@@ -2682,6 +2848,51 @@ const styles = StyleSheet.create({
   },
   editForm: {
     marginTop: 10,
+  },
+  toggleGroup: {
+    marginTop: 16,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 14,
+    padding: 12,
+    gap: 10,
+  },
+  toggleGroupTitle: {
+    color: colors.dark,
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  toggleLabel: {
+    color: colors.dark,
+    fontWeight: "600",
+    fontSize: 13,
+  },
+  toggleTrack: {
+    width: 40,
+    height: 22,
+    borderRadius: 999,
+    padding: 2,
+  },
+  toggleThumb: {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    backgroundColor: "#fff",
+  },
+  toggleThumbActive: {
+    marginLeft: "auto",
   },
   title: {
     fontSize: 20,
@@ -3309,13 +3520,13 @@ const styles = StyleSheet.create({
   },
   // Followers styles
   followersHero: {
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: "#E6EDF8",
+    borderColor: "#1E293B",
     padding: 16,
-    marginBottom: 12,
+    marginBottom: 14,
   },
-  followersHeaderRow: {
+  followersHeroHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -3323,29 +3534,67 @@ const styles = StyleSheet.create({
   followersHeroTitle: {
     fontSize: 19,
     fontWeight: "800",
-    color: colors.dark,
+    color: "#FFFFFF",
   },
   followersHeroSubtitle: {
-    color: colors.muted,
+    color: "rgba(255,255,255,0.76)",
     marginTop: 4,
     fontSize: 13,
+    lineHeight: 19,
   },
-  followersHeader: {
+  followersHeroBadge: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 16,
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
-  followerCountBadge: {
-    backgroundColor: colors.primaryLight,
+  followersHeroBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  followersSummaryGrid: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 14,
+  },
+  followersSummaryCard: {
+    flex: 1,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    borderRadius: 14,
     paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingVertical: 10,
   },
-  followerCountText: {
-    color: colors.primary,
+  followersSummaryLabel: {
+    color: "rgba(255,255,255,0.74)",
+    fontSize: 11,
     fontWeight: "700",
-    fontSize: 14,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  followersSummaryValue: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "800",
+    marginTop: 4,
+  },
+  followersLatestRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  followersLatestText: {
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 12,
+    fontWeight: "600",
   },
   loadingContainer: {
     alignItems: "center",
@@ -3358,7 +3607,7 @@ const styles = StyleSheet.create({
   },
   emptyFollowers: {
     alignItems: "center",
-    paddingVertical: 40,
+    paddingVertical: 44,
   },
   emptyFollowersTitle: {
     fontSize: 18,
@@ -3374,26 +3623,34 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   followersList: {
-    gap: 12,
-  },
-  followerItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.light,
-    padding: 12,
-    borderRadius: 12,
-    gap: 12,
+    gap: 10,
+    paddingHorizontal: 2,
   },
   followerItemRedesign: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F8FAFD",
+    backgroundColor: "#F8FAFC",
     paddingHorizontal: 12,
     paddingVertical: 10,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#E8EEF7",
+    borderColor: "#E2E8F0",
     gap: 12,
+  },
+  followerRankBadge: {
+    minWidth: 34,
+    height: 24,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#EEF2FF",
+    borderWidth: 1,
+    borderColor: "#DDE3FF",
+  },
+  followerRankText: {
+    color: "#4338CA",
+    fontSize: 11,
+    fontWeight: "800",
   },
   followerAvatar: {
     width: 48,
@@ -3411,20 +3668,136 @@ const styles = StyleSheet.create({
   followerInfo: {
     flex: 1,
   },
+  followerAvatarInitials: {
+    fontSize: 15,
+    fontWeight: "800",
+  },
   followerName: {
     fontSize: 15,
-    fontWeight: "600",
+    fontWeight: "700",
     color: colors.dark,
+  },
+  followerMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 3,
   },
   followerDate: {
     fontSize: 12,
     color: colors.muted,
-    marginTop: 2,
+  },
+  followerPill: {
+    backgroundColor: "#ECFDF3",
+    borderWidth: 1,
+    borderColor: "#D1FAE5",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  followerPillText: {
+    color: "#047857",
+    fontSize: 11,
+    fontWeight: "800",
   },
   supportHint: {
     color: colors.muted,
-    marginBottom: 8,
+    marginBottom: 10,
     lineHeight: 20,
+  },
+  followersPageContent: {
+    paddingHorizontal: 0,
+    paddingBottom: 16,
+  },
+  supportPageContent: {
+    paddingHorizontal: 0,
+    paddingBottom: 20,
+    gap: 12,
+  },
+  supportHero: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    padding: 16,
+  },
+  supportHeroTitle: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  supportHeroSubtitle: {
+    color: "rgba(255,255,255,0.78)",
+    marginTop: 6,
+    lineHeight: 19,
+    fontSize: 13,
+  },
+  supportHeroMetaRow: {
+    marginTop: 14,
+    gap: 8,
+  },
+  supportHeroMetaPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  supportHeroMetaText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  supportQuickActionsRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  supportQuickActionCard: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 12,
+  },
+  supportQuickActionTitle: {
+    marginTop: 8,
+    color: colors.dark,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  supportQuickActionText: {
+    marginTop: 4,
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  supportFormCard: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 16,
+  },
+  supportFormTitle: {
+    color: colors.dark,
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  supportSubmitButton: {
+    marginTop: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 46,
+  },
+  supportSubmitButtonText: {
+    color: "#fff",
+    fontWeight: "800",
   },
   supportPriorityRow: {
     flexDirection: "row",
