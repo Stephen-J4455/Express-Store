@@ -99,6 +99,7 @@ const CatalogScreen = () => {
   const [restockModalVisible, setRestockModalVisible] = useState(false);
   const [restockQuantity, setRestockQuantity] = useState("");
   const [restockSubmitting, setRestockSubmitting] = useState(false);
+  const isWebMobile = Platform.OS === "web" && !isWide;
 
   const AVAILABLE_COLORS = [
     { name: "Black", hex: "#000000" },
@@ -440,13 +441,19 @@ const CatalogScreen = () => {
             pickedFile,
             preferredContentType: fileType || contentType,
           });
-        uploadRes = await supabase.storage
-          .from("express-products")
-          .upload(objectPath, fileBody, {
+        uploadRes = await Promise.race([
+          supabase.storage.from("express-products").upload(objectPath, fileBody, {
             contentType: resolvedContentType,
             cacheControl: "3600",
             upsert: false,
-          });
+          }),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error("Upload timed out. Please try again.")),
+              45000,
+            ),
+          ),
+        ]);
       } else {
         const formDataUpload = new FormData();
         formDataUpload.append("file", {
@@ -697,7 +704,6 @@ const CatalogScreen = () => {
         await createProduct(productData);
       }
 
-      setSubmitting(false);
       setTitle("");
       setPrice("");
       setShippingFee("");
@@ -727,17 +733,19 @@ const CatalogScreen = () => {
       setModalVisible(false);
     } catch (error) {
       toast.error("Error", error.message);
+    } finally {
       setSubmitting(false);
     }
   };
 
   return (
     <ResponsiveContainer>
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.contentContainer}
-        refreshControl={
-          <RefreshControl
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.contentContainer}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl
             refreshing={loading}
             onRefresh={refresh}
             tintColor={theme.primary}
@@ -2261,6 +2269,11 @@ const CatalogScreen = () => {
           columnWrapperStyle={gridColumns > 1 ? { gap: 14 } : null}
           contentContainerStyle={{ gap: 14, paddingBottom: 140 }}
           scrollEnabled={false}
+          removeClippedSubviews={!isWebMobile}
+          disableVirtualization={isWebMobile}
+          initialNumToRender={isWebMobile ? filteredProducts.length : 10}
+          maxToRenderPerBatch={isWebMobile ? filteredProducts.length : 10}
+          windowSize={isWebMobile ? 21 : 10}
           ListEmptyComponent={
             <Text style={styles.empty}>No products for this filter.</Text>
           }
@@ -2286,6 +2299,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
     padding: 16,
+  },
+  contentContainer: {
+    flexGrow: 1,
+    paddingBottom: 24,
   },
   primaryButton: {
     backgroundColor: colors.primary,
