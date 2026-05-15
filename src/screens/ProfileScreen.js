@@ -362,7 +362,7 @@ Company: ExpressMart`;
       ],
     },
     {
-      title: "Legal",
+      title: "Terms & Support",
       items: [
         {
           icon: "help-circle-outline",
@@ -983,18 +983,6 @@ Company: ExpressMart`;
             >
               Followers
             </Text>
-            {followers.length > 0 && (
-              <View
-                style={[
-                  styles.profileTabBadge,
-                  { backgroundColor: theme.primary },
-                ]}
-              >
-                <Text style={styles.profileTabBadgeText}>
-                  {followers.length}
-                </Text>
-              </View>
-            )}
           </Pressable>
 
           <Pressable
@@ -2770,18 +2758,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     color: colors.muted,
-  },
-  profileTabBadge: {
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 7,
-    minWidth: 18,
-    alignItems: "center",
-  },
-  profileTabBadgeText: {
-    color: "#fff",
-    fontSize: 9,
-    fontWeight: "700",
   },
   card: {
     backgroundColor: "#fff",
