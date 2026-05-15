@@ -23,6 +23,7 @@ import { useSeller } from "../context/SellerContext";
 import { useToast } from "../context/ToastContext";
 import { ResponsiveContainer } from "../components/ResponsiveContainer";
 import { useResponsive } from "../hooks/useResponsive";
+import { getImageContentType, getWebUploadPayload } from "../utils/webUpload";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 
@@ -77,6 +78,7 @@ export const StatusCreatorScreen = ({ navigation }) => {
 
   // Image mode states
   const [image, setImage] = useState(null);
+  const [imageFile, setImageFile] = useState(null);
   const [imageCaption, setImageCaption] = useState("");
 
   // Text mode states
@@ -98,7 +100,11 @@ export const StatusCreatorScreen = ({ navigation }) => {
       quality: 0.8,
     });
     if (!result.canceled) {
-      setImage(result.assets[0].uri);
+      const selectedAsset = result.assets[0];
+      setImage(selectedAsset.uri);
+      if (Platform.OS === "web") {
+        setImageFile(selectedAsset.file || null);
+      }
     }
   };
 
@@ -120,7 +126,11 @@ export const StatusCreatorScreen = ({ navigation }) => {
       quality: 0.8,
     });
     if (!result.canceled) {
-      setImage(result.assets[0].uri);
+      const selectedAsset = result.assets[0];
+      setImage(selectedAsset.uri);
+      if (Platform.OS === "web") {
+        setImageFile(selectedAsset.file || null);
+      }
     }
   };
 
@@ -138,29 +148,24 @@ export const StatusCreatorScreen = ({ navigation }) => {
     return ext === "jpeg" ? "jpg" : ext;
   };
 
-  const uploadStatusImage = async (uri) => {
+  const uploadStatusImage = async (uri, pickedFile = null) => {
     // Build filename and detect content type
     const ext = getImageExtension(uri);
     const fileName = `${sellerId}/${Date.now()}.${ext}`;
-
-    let detectedContentType = null;
-    try {
-      const resp = await fetch(uri);
-      detectedContentType = resp.headers?.get?.("content-type") || null;
-    } catch (e) {
-      // ignore
-    }
-    const contentType =
-      detectedContentType || `image/${ext === "jpg" ? "jpeg" : ext}`;
+    const contentType = getImageContentType(uri);
 
     // Use Blob on web, FormData on native
     if (Platform.OS === "web") {
-      const response = await fetch(uri);
-      const blob = await response.blob();
+      const { fileBody, contentType: resolvedContentType } =
+        await getWebUploadPayload({
+          uri,
+          pickedFile,
+          preferredContentType: contentType,
+        });
       const { error } = await supabase.storage
         .from("seller-statuses")
-        .upload(fileName, blob, {
-          contentType,
+        .upload(fileName, fileBody, {
+          contentType: resolvedContentType,
           cacheControl: "3600",
           upsert: false,
         });
@@ -201,7 +206,7 @@ export const StatusCreatorScreen = ({ navigation }) => {
     setLoading(true);
     try {
       if (statusMode === "image") {
-        const fileName = await uploadStatusImage(image);
+        const fileName = await uploadStatusImage(image, imageFile);
 
         const {
           data: { publicUrl },

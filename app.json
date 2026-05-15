@@ -17,7 +17,9 @@
       "bundleIdentifier": "com.stephenj3.expressstore",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -45,7 +47,8 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-font"
     ],
     "extra": {
       "eas": {

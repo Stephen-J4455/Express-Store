@@ -29,6 +29,7 @@ import { LoadingAnimation } from "../components/LoadingAnimation";
 import { ResponsiveContainer } from "../components/ResponsiveContainer";
 import { useResponsive } from "../hooks/useResponsive";
 import { FeedbackScreen } from "./FeedbackScreen";
+import { getImageContentType, getWebUploadPayload } from "../utils/webUpload";
 
 const BADGE_CONFIG = {
   verified: { label: "Verified", icon: "checkmark-circle", color: "#10B981" },
@@ -116,6 +117,7 @@ export const ProfileScreen = () => {
     profile?.weekly_target?.toString() || "",
   );
   const [editAvatar, setEditAvatar] = useState(getProfileAvatarValue(profile));
+  const [editAvatarFile, setEditAvatarFile] = useState(null);
   const [editFacebook, setEditFacebook] = useState(
     profile?.social_facebook || "",
   );
@@ -281,6 +283,7 @@ Company: ExpressMart`;
     setEditFulfillmentSpeed(profile?.fulfillment_speed || "");
     setEditWeeklyTarget(profile?.weekly_target?.toString() || "");
     setEditAvatar(getProfileAvatarValue(profile));
+    setEditAvatarFile(null);
     setEditFacebook(profile?.social_facebook || "");
     setEditInstagram(profile?.social_instagram || "");
     setEditTwitter(profile?.social_twitter || "");
@@ -450,6 +453,7 @@ Company: ExpressMart`;
       setEditFulfillmentSpeed(profile?.fulfillment_speed || "");
       setEditWeeklyTarget(profile?.weekly_target?.toString() || "");
       setEditAvatar(getProfileAvatarValue(profile));
+      setEditAvatarFile(null);
       setEditFacebook(profile?.social_facebook || "");
       setEditInstagram(profile?.social_instagram || "");
       setEditTwitter(profile?.social_twitter || "");
@@ -727,10 +731,12 @@ Company: ExpressMart`;
   }, [profile?.rating, products, sellerId]);
 
   const pickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      toast.error("Camera permission is required");
-      return;
+    if (Platform.OS !== "web") {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        toast.error("Camera permission is required");
+        return;
+      }
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
@@ -739,11 +745,15 @@ Company: ExpressMart`;
       quality: 1,
     });
     if (!result.canceled) {
-      setEditAvatar(result.assets[0].uri);
+      const selectedAsset = result.assets[0];
+      setEditAvatar(selectedAsset.uri);
+      if (Platform.OS === "web") {
+        setEditAvatarFile(selectedAsset.file || null);
+      }
     }
   };
 
-  const uploadImage = async (uri) => {
+  const uploadImage = async (uri, pickedFile = null) => {
     try {
       console.log("uploadImage start:", { uri, platform: Platform.OS });
 
@@ -762,17 +772,7 @@ Company: ExpressMart`;
       const fileName = `avatar.${ext}`;
       const objectPath = sellerId ? `${sellerId}/${fileName}` : fileName;
 
-      // Try to detect content type
-      let detectedContentType = null;
-      try {
-        const resp = await fetch(uri);
-        detectedContentType = resp.headers?.get?.("content-type") || null;
-      } catch (e) {
-        // ignore
-      }
-
-      const contentType =
-        detectedContentType || `image/${ext === "jpg" ? "jpeg" : ext}`;
+      const contentType = getImageContentType(uri);
 
       // Ensure we replace any previous avatar files for this seller by cleaning the folder first
       if (sellerId) {
@@ -806,12 +806,16 @@ Company: ExpressMart`;
       // Use Blob on web, FormData on native (React Native) to ensure uploads work across platforms
       let uploadRes;
       if (Platform.OS === "web") {
-        const response = await fetch(uri);
-        const blob = await response.blob();
+        const { fileBody, contentType: resolvedContentType } =
+          await getWebUploadPayload({
+            uri,
+            pickedFile,
+            preferredContentType: contentType,
+          });
         uploadRes = await supabase.storage
           .from(PROFILE_BUCKET)
-          .upload(objectPath, blob, {
-            contentType,
+          .upload(objectPath, fileBody, {
+            contentType: resolvedContentType,
             cacheControl: "3600",
             upsert: true,
           });
@@ -853,7 +857,7 @@ Company: ExpressMart`;
         editAvatar !== getProfileAvatarValue(profile) &&
         !editAvatar.startsWith("http")
       ) {
-        avatarUrl = await uploadImage(editAvatar);
+        avatarUrl = await uploadImage(editAvatar, editAvatarFile);
       }
       const updates = {
         name: editName,
@@ -876,6 +880,7 @@ Company: ExpressMart`;
       };
       await updateProfile(updates);
       setEditing(false);
+      setEditAvatarFile(null);
       toast.success("Profile updated successfully!");
     } catch (error) {
       toast.error(error.message);

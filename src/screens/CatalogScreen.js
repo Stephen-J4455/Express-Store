@@ -29,6 +29,7 @@ import { supabase } from "../../supabase";
 import { flashSaleService } from "../services/flashSaleService";
 import { ResponsiveContainer } from "../components/ResponsiveContainer";
 import { useResponsive } from "../hooks/useResponsive";
+import { getImageContentType, getWebUploadPayload } from "../utils/webUpload";
 
 const filters = [
   { key: "all", label: "All" },
@@ -371,10 +372,12 @@ const CatalogScreen = () => {
       toast.warning("Maximum images", "You can upload up to 5 images");
       return;
     }
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      toast.error("Permission needed", "Please grant camera roll permissions");
-      return;
+    if (Platform.OS !== "web") {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        toast.error("Permission needed", "Please grant camera roll permissions");
+        return;
+      }
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
@@ -424,29 +427,23 @@ const CatalogScreen = () => {
         .substring(7)}.${ext}`;
       const sellerFolder = profile?.id || sellerId || "unknown";
       const objectPath = `products/${sellerFolder}/${fileName}`;
-
-      // Try to detect content type
-      let detectedContentType = null;
-      try {
-        const resp = await fetch(uri);
-        detectedContentType = resp.headers?.get?.("content-type") || null;
-      } catch (e) {
-        // ignore
-      }
-
-      const contentType =
-        detectedContentType || `image/${ext === "jpg" ? "jpeg" : ext}`;
+      const contentType = getImageContentType(uri);
 
       // Upload using Blob on web and FormData on native
       let uploadRes;
       if (Platform.OS === "web") {
         const pickedFile = imageFiles?.[uri]?.file || null;
         const fileType = imageFiles?.[uri]?.type || null;
-        const blob = pickedFile ? pickedFile : await (await fetch(uri)).blob();
+        const { fileBody, contentType: resolvedContentType } =
+          await getWebUploadPayload({
+            uri,
+            pickedFile,
+            preferredContentType: fileType || contentType,
+          });
         uploadRes = await supabase.storage
           .from("express-products")
-          .upload(objectPath, blob, {
-            contentType: fileType || contentType,
+          .upload(objectPath, fileBody, {
+            contentType: resolvedContentType,
             cacheControl: "3600",
             upsert: false,
           });
